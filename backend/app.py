@@ -38,6 +38,12 @@ from google.auth.transport import requests as google_requests
 from flask import Flask, jsonify, request, send_from_directory
 
 # ---------------------------------------------------------------------------
+# Application base URL (read once at module load time so it is available to
+# every function, including response hooks like _security_headers).
+# ---------------------------------------------------------------------------
+APP_BASE_URL = os.getenv("APP_BASE_URL", "")
+
+# ---------------------------------------------------------------------------
 # AI assistant configuration — Google Gemini API (free tier)
 # ---------------------------------------------------------------------------
 # Uses Google AI Studio's no-cost Gemini free tier (Flash / Flash-Lite models).
@@ -533,7 +539,7 @@ def send_verification_email(email: str, username: str, token: str) -> bool:
     if not email:
         print("[send_verification_email] Missing recipient email")
         return False
-    base_url = os.getenv("APP_BASE_URL", "").rstrip("/")
+    base_url = APP_BASE_URL.rstrip("/")
     if not base_url:
         print("[send_verification_email] Missing APP_BASE_URL")
         return False
@@ -1496,7 +1502,7 @@ def admin_create_creator():
         emailed = send_email(
             email,
             "Your Talentshowoff creator account",
-            f"Your Talentshowoff creator account has been created by the main creator.\n\nUsername: {username}\nTemporary password: {generated}\n\nSign in at {os.getenv('APP_BASE_URL', '').rstrip('/') or 'your Talentshowoff website'} and change the password if needed."
+            f"Your Talentshowoff creator account has been created by the main creator.\n\nUsername: {username}\nTemporary password: {generated}\n\nSign in at {APP_BASE_URL.rstrip('/') or 'your Talentshowoff website'} and change the password if needed."
         )
     return jsonify({"ok": True, "creator": {
         "username": username, "displayName": display_name or username, "role": "editor",
