@@ -1,0 +1,8 @@
+Flask==3.0.3
+gunicorn==23.0.0
+psycopg[binary]==3.2.9
+google-auth==2.35.0
+requests==2.32.3
+supabase==2.9.1
+bleach==6.1.0
+phonenumbers==9.0.13

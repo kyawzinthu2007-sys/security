@@ -1,0 +1,2241 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Talentshowoff — Job Board</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.5/babel.min.js"></script>
+<script src="https://accounts.google.com/gsi/client" async defer></script>
+<script src="https://cdn.tailwindcss.com"></script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+  body { font-family: 'Plus Jakarta Sans', 'Inter', system-ui, sans-serif; }
+  .line-clamp-2 { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+  ::selection { background: #c4b5fd; color: #1e1b4b; }
+  @keyframes floatIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
+  .animate-floatIn { animation: floatIn 0.35s ease both; }
+  @media print { body { display:none !important; } }
+  img { -webkit-user-drag: none; user-select: none; }
+  .tso-capture-blocked::after { content: "Screenshots and screen capture are not permitted on Talentshowoff"; position: fixed; inset: 0; z-index: 99999; display: flex; align-items: center; justify-content: center; padding: 24px; background: rgba(8, 11, 35, .94); color: white; text-align: center; font-weight: 800; font-size: 18px; pointer-events: none; }
+</style>
+</head>
+<body>
+<div id="root"></div>
+
+<script>
+  // The frontend is served by the same Flask server, so relative paths work.
+  window.__TSO_API__ = "/api";
+  window.__TSO_LOGO__ = "logo.jpg";
+</script>
+
+<script type="text/babel" data-presets="react">
+const { useState, useEffect, useMemo, useCallback, useRef } = React;
+const API = window.__TSO_API__;
+let passwordForUnifiedCreatorLogin = "";
+const LOGO_SRC = window.__TSO_LOGO__;
+
+/* ---------- tiny API client ---------- */
+async function api(path, options = {}) {
+  const res = await fetch(API + path, {
+    ...options,
+    headers: { "Content-Type": "application/json", ...(options.headers || {}) },
+  });
+  let data;
+  try { data = await res.json(); } catch (e) { data = { ok: false, error: "Server error." }; }
+  if (!res.ok && data.ok === undefined) data.ok = false;
+  return data;
+}
+
+/* ---------- local session (who is currently signed in on this browser) ---------- */
+const session = {
+  get(key, fallback) {
+    try { const v = localStorage.getItem(key); return v ? JSON.parse(v) : fallback; }
+    catch (e) { return fallback; }
+  },
+  set(key, value) { try { localStorage.setItem(key, JSON.stringify(value)); } catch (e) {} },
+  remove(key) { try { localStorage.removeItem(key); } catch (e) {} }
+};
+
+function TSOMark({ size = 40, rounded = true }) {
+  return (
+    <img src={LOGO_SRC} alt="Talentshowoff logo" width={size} height={size}
+      style={{ width: size, height: size, objectFit: "contain", borderRadius: rounded ? 10 : 0 }}
+      onError={(e) => { e.target.style.display = "none"; }} />
+  );
+}
+
+const fmtDate = (iso) => {
+  const d = new Date(iso);
+  const days = Math.floor((Date.now() - d.getTime()) / 86400000);
+  if (days <= 0) return "Today";
+  if (days === 1) return "Yesterday";
+  if (days < 7) return `${days}d ago`;
+  return d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+};
+
+const CATEGORIES = [
+  "Music & Performing Arts", "Dance", "Visual Arts & Design", "Film & Video",
+  "Writing & Content", "Modeling", "Comedy & Hosting", "Photography",
+  "Production & Crew", "Education & Teaching", "Sales & Retail", "Other Creative Work",
+];
+const JOB_TYPES = ["Full-time", "Part-time", "Freelance / Gig", "Contract", "Internship"];
+const TERMS_VERSION = "2026-08-13";
+const PRIVACY_VERSION = "2026-08-13";
+const PHONE_COUNTRIES = [
+  ["MM", "Myanmar (+95)"], ["TH", "Thailand (+66)"], ["SG", "Singapore (+65)"],
+  ["MY", "Malaysia (+60)"], ["IN", "India (+91)"], ["BD", "Bangladesh (+880)"],
+  ["CN", "China (+86)"], ["JP", "Japan (+81)"], ["KR", "South Korea (+82)"],
+  ["PH", "Philippines (+63)"], ["ID", "Indonesia (+62)"], ["VN", "Vietnam (+84)"],
+  ["GB", "United Kingdom (+44)"], ["US", "United States (+1)"], ["CA", "Canada (+1)"],
+  ["AU", "Australia (+61)"], ["NZ", "New Zealand (+64)"], ["AE", "United Arab Emirates (+971)"],
+  ["SA", "Saudi Arabia (+966)"], ["DE", "Germany (+49)"], ["FR", "France (+33)"],
+  ["IT", "Italy (+39)"], ["ES", "Spain (+34)"], ["NL", "Netherlands (+31)"],
+  ["BR", "Brazil (+55)"], ["ZA", "South Africa (+27)"], ["NG", "Nigeria (+234)"]
+];
+
+
+/* ---------- icons ---------- */
+function Star({ className = "", size = 14 }) {
+  return <svg width={size} height={size} viewBox="0 0 24 24" className={className} fill="currentColor"><path d="M12 1l2.9 7.3L22 11l-7.1 2.7L12 21l-2.9-7.3L2 11l7.1-2.7z" /></svg>;
+}
+function Sparkles({ className = "", size = 14 }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" className={className} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M12 3v4M12 17v4M3 12h4M17 12h4M6.3 6.3l2.1 2.1M15.6 15.6l2.1 2.1M6.3 17.7l2.1-2.1M15.6 8.4l2.1-2.1" />
+      <circle cx="12" cy="12" r="2.2" />
+    </svg>
+  );
+}
+function Icon({ path, size = 16, className = "" }) {
+  return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><path d={path} /></svg>;
+}
+const ICONS = {
+  image: "M3 3h18v18H3zM8.5 8.5a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3zM21 15l-5-5L5 21",
+  type: "M4 7V4h16v3M9 20h6M12 4v16",
+  upload: "M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12",
+  trash: "M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m3 0-1 14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2L4 6h16Z",
+  edit: "M17 3a2.85 2.85 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z",
+  mail: "M4 4h16v16H4V4zm0 0 8 8 8-8",
+  star: "M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z",
+  reply: "M9 14 4 9l5-5M4 9h11a4 4 0 0 1 4 4v7",
+};
+function GoogleIcon({ size = 18 }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 48 48">
+      <path fill="#FFC107" d="M43.6 20.5H42V20H24v8h11.3c-1.6 4.6-6 8-11.3 8-6.6 0-12-5.4-12-12s5.4-12 12-12c3.1 0 5.8 1.1 8 3l6-6C34.1 5.5 29.3 3.5 24 3.5 12.7 3.5 3.5 12.7 3.5 24S12.7 44.5 24 44.5 44.5 35.3 44.5 24c0-1.2-.1-2.4-.4-3.5z"/>
+      <path fill="#FF3D00" d="M6.3 14.7l6.6 4.8C14.6 16 18.9 13 24 13c3.1 0 5.8 1.1 8 3l6-6C34.1 5.5 29.3 3.5 24 3.5c-7.5 0-14 4.2-17.7 10.2z"/>
+      <path fill="#4CAF50" d="M24 44.5c5.2 0 9.9-2 13.4-5.2l-6.2-5.2c-2 1.5-4.6 2.4-7.2 2.4-5.3 0-9.7-3.4-11.3-8.1l-6.5 5C9.9 40.3 16.4 44.5 24 44.5z"/>
+      <path fill="#1976D2" d="M43.6 20.5H42V20H24v8h11.3c-.8 2.3-2.2 4.2-4.1 5.6l6.2 5.2C41 35 44.5 30 44.5 24c0-1.2-.1-2.4-.4-3.5z"/>
+    </svg>
+  );
+}
+
+/* ---------- UI atoms ---------- */
+function Badge({ children, tone = "violet" }) {
+  const tones = {
+    violet: "bg-violet-50 text-violet-700 ring-violet-200",
+    navy: "bg-indigo-50 text-indigo-700 ring-indigo-200",
+    green: "bg-emerald-50 text-emerald-700 ring-emerald-200",
+    slate: "bg-slate-100 text-slate-600 ring-slate-200",
+    amber: "bg-amber-50 text-amber-700 ring-amber-200",
+  };
+  return <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-[11px] font-bold uppercase tracking-wide ring-1 ${tones[tone]}`}>{children}</span>;
+}
+function TextField({ label, hint, ...props }) {
+  return (
+    <label className="block">
+      <span className="block text-sm font-semibold text-slate-700 mb-1.5">{label}</span>
+      <input {...props} className="w-full rounded-xl border border-slate-200 bg-slate-50/60 px-4 py-3 text-[15px] text-slate-900 placeholder-slate-400 outline-none transition focus:bg-white focus:border-violet-500 focus:ring-4 focus:ring-violet-100" />
+      {hint && <span className="block text-xs text-slate-400 mt-1">{hint}</span>}
+    </label>
+  );
+}
+function TextArea({ label, ...props }) {
+  return (
+    <label className="block">
+      <span className="block text-sm font-semibold text-slate-700 mb-1.5">{label}</span>
+      <textarea {...props} className="w-full rounded-xl border border-slate-200 bg-slate-50/60 px-4 py-3 text-[15px] text-slate-900 placeholder-slate-400 outline-none transition focus:bg-white focus:border-violet-500 focus:ring-4 focus:ring-violet-100 resize-none" />
+    </label>
+  );
+}
+function Select({ label, children, ...props }) {
+  return (
+    <label className="block">
+      <span className="block text-sm font-semibold text-slate-700 mb-1.5">{label}</span>
+      <select {...props} className="w-full rounded-xl border border-slate-200 bg-slate-50/60 px-4 py-3 text-[15px] text-slate-900 outline-none transition focus:bg-white focus:border-violet-500 focus:ring-4 focus:ring-violet-100">
+        {children}
+      </select>
+    </label>
+  );
+}
+function Button({ children, variant = "primary", className = "", ...props }) {
+  const variants = {
+    primary: "text-white shadow-lg shadow-violet-900/25 hover:shadow-xl hover:shadow-violet-900/30 hover:-translate-y-0.5 active:translate-y-0",
+    ghost: "text-slate-700 hover:bg-slate-100 active:scale-[0.98]",
+    outline: "text-violet-700 border-2 border-violet-200 hover:bg-violet-50 active:scale-[0.98]",
+    danger: "text-red-600 border-2 border-red-100 hover:bg-red-50 active:scale-[0.98]",
+    google: "text-slate-700 border-2 border-slate-200 hover:bg-slate-50 active:scale-[0.98]",
+  };
+  const style = variant === "primary" ? { background: "linear-gradient(135deg, #1e1b6e 0%, #5b21b6 55%, #7c3aed 100%)" } : {};
+  return (
+    <button {...props} style={style} disabled={props.disabled} className={`inline-flex items-center justify-center gap-2 rounded-xl px-5 py-3 text-sm font-bold transition disabled:opacity-50 disabled:pointer-events-none ${variants[variant]} ${className}`}>
+      {children}
+    </button>
+  );
+}
+function SegButton({ active, onClick, children, icon }) {
+  return (
+    <button type="button" onClick={onClick}
+      className={`flex-1 flex items-center justify-center gap-2 py-2.5 rounded-lg text-sm font-bold transition ${active ? "bg-white shadow text-violet-700" : "text-slate-500 hover:text-slate-700"}`}>
+      {icon && <Icon path={ICONS[icon]} size={15} />}{children}
+    </button>
+  );
+}
+
+function App() {
+  const [jobs, setJobs] = useState([]);
+  const [loadingJobs, setLoadingJobs] = useState(true);
+  const [applications, setApplications] = useState([]);
+  const [userApplications, setUserApplications] = useState([]);
+  const [user, setUser] = useState(() => session.get("tso:currentUser", null));
+  const [isAdmin, setIsAdmin] = useState(() => session.get("tso:isAdmin", false));
+  const [adminUsername, setAdminUsername] = useState(() => session.get("tso:creatorUsername", ""));
+  const [adminPassword, setAdminPassword] = useState(() => session.get("tso:creatorPassword", ""));
+  const [view, setView] = useState("browse");
+  const [authMode, setAuthMode] = useState("signin");
+  const [selectedJob, setSelectedJob] = useState(null);
+  const [editingJob, setEditingJob] = useState(null);
+  const [toast, setToast] = useState(null);
+  const [search, setSearch] = useState("");
+  const [categoryFilter, setCategoryFilter] = useState("All");
+  const [typeFilter, setTypeFilter] = useState("All");
+  const [remoteOnly, setRemoteOnly] = useState(false);
+
+  const refreshJobs = useCallback(async () => {
+    setLoadingJobs(true);
+    const res = await api("/jobs");
+    if (res.ok) setJobs(res.jobs);
+    setLoadingJobs(false);
+  }, []);
+
+  const refreshApplications = useCallback(async (username, password) => {
+    if (!username || !password) { setApplications([]); return; }
+    const res = await api("/applications?username=" + encodeURIComponent(username) + "&password=" + encodeURIComponent(password));
+    if (res.ok) setApplications(res.applications);
+    else setApplications([]);
+  }, []);
+
+  const refreshUserApplications = useCallback(async (username, token) => {
+    if (!username || !token) { setUserApplications([]); return; }
+    const res = await api("/applications?token=" + encodeURIComponent(token));
+    if (res.ok) setUserApplications(res.applications);
+    else setUserApplications([]);
+  }, []);
+
+  useEffect(() => { refreshJobs(); }, [refreshJobs]);
+  useEffect(() => {
+    if (isAdmin && adminUsername === "tsoofficial") refreshApplications(adminUsername, adminPasswordRef.current);
+    else if (!isAdmin) setApplications([]);
+  }, [isAdmin, adminUsername, refreshApplications]);
+  useEffect(() => { if (user && !isAdmin) refreshUserApplications(user.username, user.token); else setUserApplications([]); }, [user, isAdmin, refreshUserApplications]);
+  useEffect(() => { if (user) session.set("tso:currentUser", user); else session.remove("tso:currentUser"); }, [user]);
+  useEffect(() => { const handler = (e) => setView(e.detail); window.addEventListener("tso:navigate", handler); return () => window.removeEventListener("tso:navigate", handler); }, []);
+  useEffect(() => { session.set("tso:isAdmin", isAdmin); }, [isAdmin]);
+
+  const showToast = useCallback((msg) => { setToast(msg); setTimeout(() => setToast(null), 2800); }, []);
+
+  const filteredJobs = useMemo(() => {
+    return jobs.filter((j) => {
+      if (categoryFilter !== "All" && j.category && j.category !== categoryFilter) return false;
+      if (typeFilter !== "All" && j.type && j.type !== typeFilter) return false;
+      if (remoteOnly && !j.remote) return false;
+      if (search.trim()) {
+        const q = search.toLowerCase();
+        const hay = [j.title, j.company, j.description, j.location].filter(Boolean).join(" ").toLowerCase();
+        return hay.includes(q);
+      }
+      return true;
+    }).sort((a, b) => new Date(b.postedAt) - new Date(a.postedAt));
+  }, [jobs, search, categoryFilter, typeFilter, remoteOnly]);
+
+  async function handlePostJob(job) {
+    try {
+      const res = await api("/jobs", { method: "POST", body: JSON.stringify({ job, token: user?.token, adminUsername: adminUsername, adminPassword: adminPasswordRef.current }) });
+      if (res.ok) {
+        if (!isAdmin && user && typeof res.tsoCoins === "number") setUser(prev => prev ? { ...prev, tsoCoins: res.tsoCoins } : prev);
+        showToast(res.approvalStatus === "pending"
+          ? `Submitted for admin review${res.chargedCoins ? ` · ${res.chargedCoins} TSO coins reserved` : ""}.`
+          : (res.chargedCoins ? `Post published. ${res.chargedCoins} TSO coins used.` : "Post published successfully!"));
+        setView("browse");
+        setSelectedJob(null);
+        setEditingJob(null);
+        await refreshJobs();
+      } else {
+        showToast(res.error || "Couldn't publish the post. Please sign in again.");
+      }
+    } catch (err) {
+      console.error(err);
+      showToast("Server connection failed. Make sure the Talentshowoff server is running.");
+    }
+  }
+  async function handleJobView(jobId) {
+    try {
+      const res = await api("/jobs/" + jobId + "/view", {
+        method: "POST",
+        body: JSON.stringify({ token: user?.token || "" })
+      });
+      if (res.ok && typeof res.viewCount === "number") {
+        setJobs(prev => prev.map(j => j.id === jobId ? { ...j, viewCount: res.viewCount } : j));
+        setSelectedJob(prev => prev && prev.id === jobId ? { ...prev, viewCount: res.viewCount } : prev);
+      }
+    } catch (err) {
+      console.warn("Could not record job view", err);
+    }
+  }
+  async function handleUpdateJob(updated) {
+    const res = await api("/jobs/" + updated.id, { method: "PUT", body: JSON.stringify({ job: updated, adminUsername: adminUsername, adminPassword: adminPasswordRef.current }) });
+    if (res.ok) { showToast("Post updated."); setEditingJob(null); setView("browse"); refreshJobs(); setSelectedJob(null); }
+    else showToast(res.error || "Couldn't update.");
+  }
+  async function handleDeleteJob(jobId) {
+    const res = await api("/jobs/" + jobId, { method: "DELETE", body: JSON.stringify({ adminUsername: adminUsername, adminPassword: adminPasswordRef.current }) });
+    if (res.ok) { showToast("Post deleted."); setSelectedJob(null); setView("browse"); refreshJobs(); }
+    else showToast(res.error || "Couldn't delete.");
+  }
+  async function handleApply(jobId, applicant) {
+    // The application endpoint authenticates users with the server-issued session token.
+    // Do not rely on username alone because the server intentionally ignores it for authentication.
+    const currentUser = user || session.get("tso:currentUser", null);
+    if (!currentUser?.token) {
+      showToast("Your sign-in session has expired. Please sign in again.");
+      setView("auth");
+      return;
+    }
+    const res = await api("/applications", {
+      method: "POST",
+      body: JSON.stringify({ jobId, token: currentUser.token, ...applicant })
+    });
+    if (res.ok) {
+      showToast("Application sent!");
+      await refreshUserApplications(currentUser.username, currentUser.token);
+      setView("dashboard");
+    } else if (res.error === "Please sign in before applying for a role.") {
+      showToast("Your sign-in session has expired. Please sign in again.");
+      setUser(null);
+      session.remove("tso:currentUser");
+      setView("auth");
+    } else {
+      showToast(res.error || "Couldn't submit application.");
+    }
+  }
+  function handleAuthed(u) {
+    setUser(u);
+    if (u.isCreator) {
+      adminPasswordRef.current = passwordForUnifiedCreatorLogin;
+      setAdminPassword(passwordForUnifiedCreatorLogin);
+      setAdminUsername(u.username);
+      setIsAdmin(true);
+      session.set("tso:creatorUsername", u.username);
+      showToast(`Welcome, ${u.displayName}! Creator access enabled.`);
+    } else {
+      showToast(u.dailyLoginReward ? `Welcome, ${u.displayName}! +${u.dailyLoginReward} TSO coins for today's login.` : `Welcome, ${u.displayName}!`);
+    }
+    setView("browse");
+  }
+  function handleLogout() { setUser(null); setUserApplications([]); setApplications([]); handleAdminLogout(false); showToast("Signed out."); setView("browse"); }
+
+  const adminPasswordRef = useRef("");
+  function handleAdminLogin(account) {
+    adminPasswordRef.current = account.password;
+    setAdminPassword(account.password);
+    setAdminUsername(account.username);
+    setIsAdmin(true);
+    session.set("tso:creatorUsername", account.username);
+    showToast(`Signed in as ${account.username}.`);
+    setView("browse");
+  }
+  function handleAdminLogout() {
+    adminPasswordRef.current = "";
+    setAdminUsername("");
+    setIsAdmin(false);
+    session.remove("tso:creatorUsername"); session.remove("tso:creatorPassword"); setAdminPassword("");
+    setApplications([]);
+    showToast("Signed out of creator account.");
+    setView("browse");
+  }
+
+  const [openTSOSignal, setOpenTSOSignal] = useState(0);
+
+  useEffect(() => {
+    const block = (e) => {
+      const k = (e.key || "").toLowerCase();
+      if (k === "printscreen" || (e.ctrlKey && ["s", "p", "u"].includes(k)) || (e.ctrlKey && e.shiftKey && ["i", "j", "c"].includes(k)) || e.key === "F12") {
+        e.preventDefault(); e.stopPropagation();
+        document.body.classList.add("tso-capture-blocked");
+        window.setTimeout(() => document.body.classList.remove("tso-capture-blocked"), 900);
+      }
+    };
+    const context = (e) => e.preventDefault();
+    const copyBlock = (e) => { e.preventDefault(); document.body.classList.add("tso-capture-blocked"); window.setTimeout(() => document.body.classList.remove("tso-capture-blocked"), 1200); };
+    const dragBlock = (e) => e.preventDefault();
+    const blurOnCapture = () => { if (document.hidden) document.body.classList.add("tso-capture-blocked"); else document.body.classList.remove("tso-capture-blocked"); };
+    document.addEventListener("keydown", block, true);
+    document.addEventListener("contextmenu", context, true);
+    document.addEventListener("copy", copyBlock, true);
+    document.addEventListener("cut", copyBlock, true);
+    document.addEventListener("dragstart", dragBlock, true);
+    document.addEventListener("selectstart", copyBlock, true);
+    document.addEventListener("visibilitychange", blurOnCapture, true);
+    window.addEventListener("beforeprint", () => document.body.classList.add("tso-capture-blocked"));
+    return () => { document.removeEventListener("keydown", block, true); document.removeEventListener("contextmenu", context, true); document.removeEventListener("copy", copyBlock, true); document.removeEventListener("cut", copyBlock, true); document.removeEventListener("dragstart", dragBlock, true); document.removeEventListener("selectstart", copyBlock, true); document.removeEventListener("visibilitychange", blurOnCapture, true); };
+  }, []);
+
+  return (
+    <div className="min-h-screen bg-slate-50 text-slate-900 flex flex-col">
+      <Header user={user} isAdmin={isAdmin} adminUsername={adminUsername} canViewApplications={isAdmin && adminUsername === "tsoofficial"} view={view} setView={setView} onLogout={handleLogout} onAdminLogout={handleAdminLogout} onOpenTSO={() => setOpenTSOSignal((n) => n + 1)} />
+      {toast && (
+        <div className="fixed top-5 left-1/2 -translate-x-1/2 z-50 animate-floatIn">
+          <div className="flex items-center gap-2 text-white px-4 py-2.5 rounded-full shadow-xl text-sm font-semibold" style={{ background: "linear-gradient(135deg, #1e1b6e 0%, #7c3aed 100%)" }}>
+            <Star size={14} />{toast}
+          </div>
+        </div>
+      )}
+      <div className="flex-1">
+        {view === "browse" && !selectedJob && !editingJob && (
+          <Browse jobs={filteredJobs} total={jobs.length} loading={loadingJobs} search={search} setSearch={setSearch}
+            categoryFilter={categoryFilter} setCategoryFilter={setCategoryFilter}
+            typeFilter={typeFilter} setTypeFilter={setTypeFilter}
+            remoteOnly={remoteOnly} setRemoteOnly={setRemoteOnly}
+            onSelect={(job) => { setSelectedJob(job); handleJobView(job.id); }} isAdmin={isAdmin} canDelete={adminUsername === "tsoofficial"} setView={setView} canBrowseAll={!!user || isAdmin}
+            onEdit={(j) => { setEditingJob(j); setView("edit"); }} onDelete={handleDeleteJob} />
+        )}
+        {selectedJob && !editingJob && (
+          <JobDetail job={selectedJob} onBack={() => setSelectedJob(null)} user={user} isAdmin={isAdmin} canDelete={adminUsername === "tsoofficial"}
+            onApply={handleApply} hasApplied={userApplications.some((a) => a.jobId === selectedJob.id)}
+            setView={setView} onEdit={(j) => setEditingJob(j)} onDelete={handleDeleteJob} />
+        )}
+        {view === "post" && !selectedJob && !editingJob && <PostJob isAdmin={isAdmin} user={user} onSubmit={handlePostJob} setView={setView} adminUsername={adminUsername} adminPassword={adminPassword} />}
+        {view === "tasks" && !isAdmin && user && <Tasks user={user} onUserUpdated={setUser} />}
+        {editingJob && <EditJob job={editingJob} onSubmit={handleUpdateJob} onCancel={() => setEditingJob(null)} onDelete={handleDeleteJob} canDelete={adminUsername === "tsoofficial"} adminUsername={adminUsername} adminPassword={adminPassword} />}
+        {view === "users" && !selectedJob && !editingJob && isAdmin && adminUsername === "tsoofficial" && <CreatorUserManagement adminUsername={adminUsername} adminPassword={adminPassword} onPasswordNotice={()=>{}} />}
+        {view === "creator-coins" && !selectedJob && !editingJob && isAdmin && <CreatorCoinManagement adminUsername={adminUsername} adminPassword={adminPassword} />}
+        {view === "moderation" && !selectedJob && !editingJob && isAdmin && <JobModeration adminUsername={adminUsername} adminPassword={adminPassword} onNotify={showToast} onJobsChanged={refreshJobs} />}
+        {view === "dashboard" && !selectedJob && !editingJob && (
+          isAdmin && adminUsername === "tsoofficial"
+            ? <CreatorApplications jobs={jobs} applications={applications} adminUsername={adminUsername} adminPassword={adminPassword} onNotify={showToast}
+                onApplicationUpdated={(updated) => setApplications((prev) => prev.map((a) => a.id === updated.id ? updated : a))} />
+            : <Dashboard user={user} jobs={jobs} applications={userApplications} onSelectJob={setSelectedJob} />
+        )}        {view === "mail" && !selectedJob && !editingJob && user && isAdmin && <Mail user={user} onNotify={showToast} />}
+        {view === "profile" && !selectedJob && !editingJob && user && !isAdmin && <Profile user={user} onSaved={(u) => setUser({ ...u, token: user.token })} setView={setView} />}
+        {view === "terms" && !selectedJob && !editingJob && <LegalPage type="terms" onBack={() => setView("auth")} />}
+        {view === "privacy" && !selectedJob && !editingJob && <LegalPage type="privacy" onBack={() => setView("auth")} />}
+        {view === "auth" && !selectedJob && !editingJob && <Auth onAuthed={handleAuthed} setView={setView} setAuthMode={setAuthMode} initialMode={authMode} />}
+        {view === "admin" && !selectedJob && !editingJob && <AdminLogin isAdmin={isAdmin} onLogin={handleAdminLogin} onLogout={handleAdminLogout} />}
+      </div>
+      <TSOChat isAdmin={isAdmin} adminUsername={adminUsername} adminPassword={adminPassword} openSignal={openTSOSignal} />
+      <Footer />
+    </div>
+  );
+}
+
+function Header({ user, isAdmin, adminUsername, canViewApplications, view, setView, onLogout, onAdminLogout, onOpenTSO }) {
+  const [menuOpen, setMenuOpen] = useState(false);
+  const creator = isAdmin;
+  const item = (label, icon, target, condition = true) => condition && (
+    <button type="button" onClick={() => { setView(target); setMenuOpen(false); }}
+      className={`w-full sm:w-auto flex items-center gap-2 px-3.5 py-2.5 rounded-xl text-sm font-bold transition ${view === target ? "bg-violet-50 text-violet-700 shadow-sm" : "text-slate-600 hover:bg-slate-100"}`}>
+      <Icon path={icon} size={16} />{label}
+    </button>
+  );
+  return (
+    <header className="sticky top-0 z-40 bg-white/90 backdrop-blur-xl border-b border-slate-200/70 shadow-sm">
+      <div className="max-w-7xl mx-auto px-4 sm:px-5 py-3 flex items-center justify-between gap-3">
+        <button onClick={() => { setView("browse"); setMenuOpen(false); }} className="flex items-center gap-2.5 shrink-0">
+          <TSOMark size={38} />
+          <div className="text-left leading-tight">
+            <div className="font-extrabold text-[17px] tracking-tight"><span style={{color:"#151349"}}>Talent</span><span style={{color:"#7c3aed"}}>showoff</span></div>
+            <div className="hidden md:block text-[10px] font-bold tracking-wider text-slate-400 uppercase">Show your talent. Inspire the world.</div>
+          </div>
+        </button>
+
+        <div className="hidden lg:flex items-center gap-1.5">
+          {item("Browse", "M3 12h18M3 6h18M3 18h18", "browse")}
+          <button onClick={onOpenTSO} className="flex items-center gap-2 px-3.5 py-2.5 rounded-xl text-sm font-bold text-violet-600 hover:bg-violet-50"><Sparkles size={15}/>TSO AI</button>
+          {item("Dashboard", "M3 13h8V3H3v10zM13 21h8V11h-8v10zM3 21h8v-6H3v6zM13 9h8V3h-8v6z", "dashboard", !!user && !isAdmin)}
+          {item("Tasks", "M9 11l3 3L22 4M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11", "tasks", !!user && !isAdmin)}
+          {item("Profile", "M20 21a8 8 0 0 0-16 0M12 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8z", "profile", !!user && !isAdmin)}
+          {item("Mail", "M4 4h16v16H4V4zm0 0 8 8 8-8", "mail", !!user && isAdmin)}
+          {item("Moderation", "M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z", "moderation", !!isAdmin)}
+          {item("Users", "M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75", "users", !!canViewApplications)}
+          {item("Applications", "M4 4h16v16H4zM8 9h8M8 13h5", "dashboard", !!canViewApplications)}
+        </div>
+
+        <div className="flex items-center gap-2">
+          {(isAdmin || user) && <Button variant="primary" className="!px-3.5 !py-2.5 text-[13px] sm:text-sm !rounded-xl" onClick={() => { setView("post"); setMenuOpen(false); }}><span className="text-base leading-none">＋</span> New post</Button>}
+          <button type="button" aria-label="Open navigation menu" aria-expanded={menuOpen} onClick={() => setMenuOpen(v => !v)}
+            className="lg:hidden w-10 h-10 rounded-xl border border-slate-200 bg-white flex items-center justify-center text-slate-700 hover:bg-slate-50">
+            {menuOpen ? <Icon path="M6 6l12 12M18 6L6 18" size={19}/> : <Icon path="M4 6h16M4 12h16M4 18h16" size={19}/>}
+          </button>
+          {isAdmin ? <Badge tone="amber">Creator</Badge> : null}
+          {user && !isAdmin ? (
+            <button onClick={() => setView("profile")} className="hidden sm:flex items-center gap-2 px-2 py-1.5 rounded-xl hover:bg-slate-100" title="Open profile">
+              {user.avatar ? <img src={user.avatar} alt="" className="w-8 h-8 rounded-full object-cover"/> : <div className="w-8 h-8 rounded-full bg-violet-100 text-violet-700 flex items-center justify-center text-xs font-bold">{(user.displayName || "?")[0].toUpperCase()}</div>}
+              <span className="hidden xl:inline text-sm font-bold text-slate-700">{user.displayName || "Profile"}</span>
+            </button>
+          ) : null}
+          {!user && !isAdmin && <button onClick={() => setView("auth")} className="hidden sm:inline-flex px-3 py-2.5 rounded-xl text-sm font-bold text-slate-600 hover:bg-slate-100">Sign in</button>}
+        </div>
+      </div>
+
+      {menuOpen && (
+        <div className="lg:hidden border-t border-slate-100 bg-white/95 backdrop-blur-xl shadow-xl">
+          <div className="max-w-7xl mx-auto p-3 grid sm:grid-cols-2 gap-2">
+            {item("Browse", "M3 12h18M3 6h18M3 18h18", "browse")}
+            <button onClick={() => {onOpenTSO();setMenuOpen(false)}} className="w-full flex items-center gap-2 px-3.5 py-2.5 rounded-xl text-sm font-bold text-violet-600 hover:bg-violet-50"><Sparkles size={16}/>TSO AI Assistant</button>
+            {item("Dashboard", "M3 13h8V3H3v10zM13 21h8V11h-8v10zM3 21h8v-6H3v6zM13 9h8V3h-8v6z", "dashboard", !!user && !isAdmin)}
+            {item("Tasks & Rewards", "M9 11l3 3L22 4M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11", "tasks", !!user && !isAdmin)}
+            {item("Profile & Security", "M20 21a8 8 0 0 0-16 0M12 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8z", "profile", !!user && !isAdmin)}
+            {item("Creator Mail", "M4 4h16v16H4V4zm0 0 8 8 8-8", "mail", !!user && isAdmin)}
+            {item("Post Moderation", "M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z", "moderation", !!isAdmin)}
+            {item("Users", "M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75", "users", !!canViewApplications)}
+            {item("Job Applications", "M4 4h16v16H4zM8 9h8M8 13h5", "dashboard", !!canViewApplications)}
+            {item("TSO Coins", "M12 1v22M17 5.5C16 4.6 14.5 4 12 4c-2.8 0-5 1.3-5 3.5 0 5 10 2.5 10 7 0 2.2-2.2 3.5-5 3.5-2.5 0-4-.6-5-1.5", "creator-coins", !!isAdmin)}
+            {isAdmin && <button onClick={() => {onAdminLogout();setMenuOpen(false)}} className="w-full text-left px-3.5 py-2.5 rounded-xl text-sm font-bold text-red-600 hover:bg-red-50">Sign out creator</button>}
+            {user && <button onClick={() => {onLogout();setMenuOpen(false)}} className="w-full text-left px-3.5 py-2.5 rounded-xl text-sm font-bold text-red-600 hover:bg-red-50">Sign out</button>}
+            {!user && !isAdmin && item("Sign in", "M15 3h6v18h-6M10 17l5-5-5-5M15 12H3", "auth")}
+          </div>
+        </div>
+      )}
+    </header>
+  );
+}
+
+function Browse({ jobs, total, loading, search, setSearch, categoryFilter, setCategoryFilter, typeFilter, setTypeFilter, remoteOnly, setRemoteOnly, onSelect, isAdmin, canDelete, setView, onEdit, onDelete, canBrowseAll }) {
+  return (
+    <React.Fragment>
+      <section className="relative overflow-hidden" style={{ background: "radial-gradient(120% 120% at 15% 0%, #2c1567 0%, #0b0f3d 55%, #0a0d2e 100%)" }}>
+        <div className="absolute -right-20 -top-20 opacity-[0.15] pointer-events-none"><Star size={320} className="text-white" /></div>
+        <div className="absolute right-1/3 top-1/2 opacity-[0.08] pointer-events-none"><Star size={140} className="text-violet-300" /></div>
+        <div className="max-w-6xl mx-auto px-5 pt-12 pb-16 relative">
+          <div className="flex items-center gap-3 mb-7">
+            <div className="bg-white rounded-2xl p-2 shadow-2xl shadow-violet-950/40"><TSOMark size={54} /></div>
+            <div className="flex items-center gap-1.5 text-violet-200 text-xs font-bold uppercase tracking-widest"><Star size={13} />The stage for creative talent</div>
+          </div>
+          <h1 className="text-3xl sm:text-5xl font-extrabold text-white leading-[1.08] tracking-tight max-w-2xl">Show your talent.<br /><span className="bg-gradient-to-r from-violet-300 to-fuchsia-300 bg-clip-text text-transparent">Get discovered.</span></h1>
+          <p className="mt-4 text-violet-100/80 max-w-lg text-[15px] sm:text-base leading-relaxed">Real gigs and jobs for musicians, dancers, designers, filmmakers, writers, and every kind of performer. <span className="text-white font-semibold">{total} opportunities</span> live right now.</p>
+          <div className="mt-8 flex flex-wrap gap-3">
+            <div className="relative w-full sm:w-96">
+              <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search roles, studios, cities…"
+                className="w-full rounded-full pl-5 pr-12 py-3.5 text-[15px] text-slate-900 placeholder-slate-400 outline-none shadow-2xl focus:ring-4 focus:ring-violet-400/40" />
+              <Icon path="M11 4a7 7 0 1 0 0 14 7 7 0 0 0 0-14zM21 21l-4.35-4.35" size={18} className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-400" />
+            </div>
+            {(isAdmin || canBrowseAll) && <Button variant="outline" className="!bg-white/10 !text-white !border-white/25 hover:!bg-white/20" onClick={() => setView("post")}>+ Post an announcement</Button>}
+          </div>
+        </div>
+      </section>
+
+      <div className="max-w-6xl mx-auto px-5 -mt-7 relative z-10">
+        <div className="bg-white rounded-2xl border border-slate-200 shadow-lg shadow-slate-900/5 p-3 flex flex-wrap items-center gap-2">
+          <select value={categoryFilter} onChange={(e) => setCategoryFilter(e.target.value)} className="rounded-lg border border-slate-200 px-3 py-2 text-sm font-semibold text-slate-700 bg-white outline-none focus:border-violet-400">
+            <option>All</option>{CATEGORIES.map((c) => <option key={c}>{c}</option>)}
+          </select>
+          <select value={typeFilter} onChange={(e) => setTypeFilter(e.target.value)} className="rounded-lg border border-slate-200 px-3 py-2 text-sm font-semibold text-slate-700 bg-white outline-none focus:border-violet-400">
+            <option>All</option>{JOB_TYPES.map((t) => <option key={t}>{t}</option>)}
+          </select>
+          <label className="flex items-center gap-2 px-3 py-2 text-sm font-semibold text-slate-700 cursor-pointer select-none">
+            <input type="checkbox" checked={remoteOnly} onChange={(e) => setRemoteOnly(e.target.checked)} className="rounded border-slate-300 text-violet-600 focus:ring-violet-400" />Remote only
+          </label>
+          {(categoryFilter !== "All" || typeFilter !== "All" || remoteOnly || search) && (
+            <button onClick={() => { setCategoryFilter("All"); setTypeFilter("All"); setRemoteOnly(false); setSearch(""); }} className="ml-auto text-sm font-bold text-violet-600 hover:text-violet-800 px-2">Clear filters</button>
+          )}
+        </div>
+      </div>
+
+      <section className="max-w-6xl mx-auto px-5 py-8">
+        {loading ? (
+          <div className="text-center py-24 text-slate-400 font-semibold">Loading jobs from server…</div>
+        ) : jobs.length === 0 ? (
+          <div className="text-center py-24">
+            <div className="inline-flex mb-4 opacity-30"><TSOMark size={52} /></div>
+            <p className="text-slate-500 font-semibold">No posts match those filters yet.</p>
+            <p className="text-slate-400 text-sm mt-1">Try broadening your search.</p>
+          </div>
+        ) : (
+          <div className="grid gap-4 sm:grid-cols-2">
+            {(canBrowseAll ? jobs : jobs.slice(0, 6)).map((job) => <JobCard key={job.id} job={job} onClick={() => onSelect(job)} isAdmin={isAdmin} onEdit={() => onEdit(job)} onDelete={() => onDelete(job.id)} />)}
+          </div>
+        )}
+        {!loading && !canBrowseAll && jobs.length > 6 && (
+          <div className="mt-8 rounded-2xl border border-violet-200 bg-violet-50 p-6 text-center">
+            <h3 className="font-extrabold text-slate-900">Want to see more job opportunities?</h3>
+            <p className="text-sm text-slate-500 mt-1 mb-4">Create an account or sign in to browse the full job board.</p>
+            <div className="flex justify-center gap-3">
+              <Button onClick={() => setView("auth")}>Sign up / Sign in</Button>
+            </div>
+          </div>
+        )}
+      </section>
+    </React.Fragment>
+  );
+}
+
+function JobCard({ job, onClick, isAdmin, canDelete, onEdit, onDelete }) {
+  const isImage = job.postType === "image";
+  return (
+    <div className="relative bg-white rounded-2xl border border-slate-200 overflow-hidden hover:border-violet-300 hover:shadow-xl hover:shadow-violet-900/8 hover:-translate-y-0.5 transition group flex flex-col">
+      <button onClick={onClick} className="text-left w-full flex-1">
+        {isImage && job.imageData && (
+          <div className="w-full bg-slate-100 border-b border-slate-100">
+            <img src={job.imageData} alt={job.title || "Job announcement"} className="w-full h-56 object-cover object-top" />
+          </div>
+        )}
+        <div className="p-5">
+          <div className="flex items-start justify-between gap-4">
+            <div className="min-w-0">
+              <h3 className="font-bold text-[17px] text-slate-900 group-hover:text-violet-700 transition line-clamp-2">{job.title || "Job Announcement"}</h3>
+              {(job.company || job.location) && <p className="text-slate-500 text-sm mt-0.5">{[job.company, job.location].filter(Boolean).join(" · ")}</p>}
+            </div>
+            <span className="shrink-0 text-xs font-semibold text-slate-400 whitespace-nowrap">{fmtDate(job.postedAt)}</span>
+          </div>
+          {job.description && <p className="text-slate-500 text-sm mt-3 line-clamp-2">{job.description}</p>}
+          <div className="flex flex-wrap items-center gap-2 mt-4">
+            {isImage && <Badge tone="amber">Announcement</Badge>}
+            {job.category && <Badge tone="violet">{job.category}</Badge>}
+            {job.type && <Badge tone="navy">{job.type}</Badge>}
+            {job.remote && <Badge tone="green">Remote</Badge>}
+            {job.pay && <span className="text-xs font-bold text-slate-500 ml-auto">{job.pay}</span>}
+          </div>
+          <div className="mt-3 pt-3 border-t border-slate-100 flex items-center gap-1.5 text-xs font-semibold text-slate-400">
+            <Icon path={ICONS.eye || "M1 12s4-7 11-7 11 7 11 7-4 7-11 7S1 12 1 12zm11 3a3 3 0 1 0 0-6 3 3 0 0 0 0 6z"} size={14} />
+            <span>{job.viewCount || 0} {Number(job.viewCount || 0) === 1 ? "person has seen this post" : "people have seen this post"}</span>
+          </div>
+        </div>
+      </button>
+      {isAdmin && (
+        <div className="flex gap-2 px-5 pb-4 pt-1">
+          <button onClick={(e) => { e.stopPropagation(); onEdit(); }} className="flex items-center gap-1 text-xs font-bold text-violet-600 hover:text-violet-800 px-2 py-1"><Icon path={ICONS.edit} size={13} />Edit</button>
+          {canDelete && <button onClick={(e) => { e.stopPropagation(); if (window.confirm("Delete this post? This can't be undone.")) onDelete(); }} className="flex items-center gap-1 text-xs font-bold text-red-500 hover:text-red-700 px-2 py-1"><Icon path={ICONS.trash} size={13} />Delete</button>}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function CVUploadField({ value, name, onChange }) {
+  const inputRef = useRef(null);
+  function choose(file) {
+    if (!file) return;
+    const allowed = ["application/pdf", "application/msword", "application/vnd.openxmlformats-officedocument.wordprocessingml.document"];
+    if (!allowed.includes(file.type)) { alert("Please upload a PDF, DOC, or DOCX CV."); return; }
+    if (file.size > 9 * 1024 * 1024) { alert("Please upload a CV smaller than 9 MB."); return; }
+    const reader = new FileReader();
+    reader.onload = (e) => onChange({ data: e.target.result, name: file.name });
+    reader.readAsDataURL(file);
+  }
+  return (
+    <div>
+      <span className="block text-sm font-semibold text-slate-700 mb-1.5">CV / Resume <span className="text-red-500">*</span></span>
+      <div onClick={() => inputRef.current?.click()} className="rounded-xl border-2 border-dashed border-slate-300 hover:border-violet-400 hover:bg-violet-50/40 p-5 text-center cursor-pointer transition">
+        <Icon path={ICONS.upload} size={26} className="mx-auto text-violet-500 mb-2" />
+        <p className="text-sm font-bold text-slate-700">{name || "Click to upload your CV"}</p>
+        <p className="text-xs text-slate-400 mt-1">PDF, DOC or DOCX · Maximum 9 MB</p>
+      </div>
+      <input ref={inputRef} type="file" accept=".pdf,.doc,.docx,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document" className="hidden" onChange={(e) => choose(e.target.files[0])} />
+    </div>
+  );
+}
+
+function JobDetail({ job, onBack, user, isAdmin, canDelete, onApply, hasApplied, setView, onEdit, onDelete }) {
+  const [showForm, setShowForm] = useState(false);
+  const [form, setForm] = useState({ name: user?.displayName || "", email: user?.email || "", phone: "", portfolio: "", message: "" });
+  const [cv, setCv] = useState(null);
+  const [submitted, setSubmitted] = useState(hasApplied);
+  const isImage = job.postType === "image";
+
+  function submit(e) {
+    e.preventDefault();
+    if (!user) { setView("auth"); return; }
+    if (!cv) { alert("Please upload your CV before submitting."); return; }
+    onApply(job.id, { ...form, cvData: cv.data, cvName: cv.name });
+    setSubmitted(true);
+    setShowForm(false);
+  }
+
+  return (
+    <div className="max-w-3xl mx-auto px-5 py-8">
+      <button onClick={onBack} className="flex items-center gap-1.5 text-sm font-bold text-slate-500 hover:text-violet-700 mb-6">
+        <Icon path="M15 18l-6-6 6-6" size={16} />Back to listings
+      </button>
+      <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden shadow-sm">
+        {isImage && job.imageData && (
+          <div className="w-full bg-slate-100 border-b border-slate-100">
+            <img src={job.imageData} alt={job.title || "Job announcement"} className="w-full max-h-[720px] object-contain bg-white" />
+          </div>
+        )}
+        <div className="p-6 sm:p-8">
+          <div className="flex flex-wrap items-center justify-between gap-3 mb-3">
+            <div className="flex flex-wrap items-center gap-2">
+              {isImage && <Badge tone="amber">Announcement</Badge>}
+              {job.category && <Badge tone="violet">{job.category}</Badge>}
+              {job.type && <Badge tone="navy">{job.type}</Badge>}
+              {job.remote && <Badge tone="green">Remote</Badge>}
+            </div>
+            {isAdmin && (
+              <div className="flex gap-2">
+                <Button variant="outline" className="!px-3 !py-1.5 text-xs" onClick={() => onEdit(job)}>Edit post</Button>
+                {canDelete && <Button variant="danger" className="!px-3 !py-1.5 text-xs" onClick={() => { if (window.confirm("Delete this post? This can't be undone.")) onDelete(job.id); }}>Delete</Button>}
+              </div>
+            )}
+          </div>
+          {job.title && <h1 className="text-2xl sm:text-3xl font-extrabold text-slate-900 tracking-tight">{job.title}</h1>}
+          {(job.company || job.location) && <p className="text-slate-500 mt-1.5">{[job.company, job.location].filter(Boolean).join(" · ")}{job.postedAt ? ` · Posted ${fmtDate(job.postedAt)}` : ""}</p>}
+          <div className="mt-3 flex items-center gap-1.5 text-sm font-semibold text-slate-500">
+            <Icon path={ICONS.eye || "M1 12s4-7 11-7 11 7 11 7-4 7-11 7S1 12 1 12zm11 3a3 3 0 1 0 0-6 3 3 0 0 0 0 6z"} size={16} />
+            <span>{job.viewCount || 0} {Number(job.viewCount || 0) === 1 ? "person has seen this post" : "people have seen this post"}</span>
+          </div>
+          {job.pay && <p className="text-violet-700 font-bold mt-3">{job.pay}</p>}
+          {job.description && (
+            <React.Fragment>
+              <div className="h-px bg-slate-100 my-6" />
+              <h2 className="font-bold text-slate-900 mb-2">About this role</h2>
+              <p className="text-slate-600 leading-relaxed whitespace-pre-line">{job.description}</p>
+            </React.Fragment>
+          )}
+          <div className="h-px bg-slate-100 my-6" />
+          {submitted ? (
+            <div className="flex items-center gap-3 bg-emerald-50 text-emerald-800 rounded-xl px-4 py-3.5 font-semibold text-sm"><Star size={16} className="text-emerald-600" />You've applied to this role. The employer will reach out via email.</div>
+          ) : showForm ? (
+            <form onSubmit={submit} className="space-y-4">
+              <TextField label="Your name" required value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
+              <TextField label="Email" type="email" required value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} />
+              <TextField label="Phone number" type="tel" required value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} placeholder="+95…" />
+              <CVUploadField value={cv?.data} name={cv?.name} onChange={setCv} />
+              <TextField label="Portfolio / reel / socials (optional)" value={form.portfolio} onChange={(e) => setForm({ ...form, portfolio: e.target.value })} placeholder="https://…" />
+              <TextArea label="Why you're a fit" rows={4} value={form.message} onChange={(e) => setForm({ ...form, message: e.target.value })} placeholder="Tell them about your experience and availability…" />
+              <div className="flex gap-3"><Button type="submit">Submit application</Button><Button type="button" variant="ghost" onClick={() => setShowForm(false)}>Cancel</Button></div>
+            </form>
+          ) : (
+            <Button onClick={() => (user ? setShowForm(true) : setView("auth"))}>{user ? "Apply for this role" : "Sign in to apply"}</Button>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ---------- Image upload field ---------- */
+function ImageUploadField({ value, onChange }) {
+  const inputRef = useRef(null);
+  const [dragOver, setDragOver] = useState(false);
+
+  function handleFile(file) {
+    if (!file || !file.type.startsWith("image/")) return;
+    const reader = new FileReader();
+    reader.onerror = () => alert("Could not read that image. Please choose another file.");
+    reader.onload = (e) => {
+      const img = new Image();
+      img.onload = () => {
+        // Compress large flyers before sending them as JSON so Publish works
+        // reliably even with phone screenshots or high-resolution images.
+        const maxSide = 1800;
+        const scale = Math.min(1, maxSide / Math.max(img.width, img.height));
+        const canvas = document.createElement("canvas");
+        canvas.width = Math.max(1, Math.round(img.width * scale));
+        canvas.height = Math.max(1, Math.round(img.height * scale));
+        const ctx = canvas.getContext("2d");
+        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+        onChange(canvas.toDataURL("image/jpeg", 0.82));
+      };
+      img.onerror = () => alert("That image could not be processed. Please try JPG or PNG.");
+      img.src = e.target.result;
+    };
+    reader.readAsDataURL(file);
+  }
+
+  return (
+    <div>
+      <span className="block text-sm font-semibold text-slate-700 mb-1.5">Job post image</span>
+      {value ? (
+        <div className="relative rounded-xl overflow-hidden border border-slate-200">
+          <img src={value} alt="Job post preview" className="w-full max-h-96 object-contain bg-slate-50" />
+          <button type="button" onClick={() => onChange(null)} className="absolute top-2 right-2 bg-white/95 hover:bg-white text-red-600 rounded-lg px-3 py-1.5 text-xs font-bold shadow">Remove</button>
+        </div>
+      ) : (
+        <div
+          onClick={() => inputRef.current && inputRef.current.click()}
+          onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
+          onDragLeave={() => setDragOver(false)}
+          onDrop={(e) => { e.preventDefault(); setDragOver(false); handleFile(e.dataTransfer.files[0]); }}
+          className={`flex flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed px-6 py-10 text-center cursor-pointer transition ${dragOver ? "border-violet-500 bg-violet-50" : "border-slate-300 hover:border-violet-400 hover:bg-slate-50"}`}
+        >
+          <Icon path={ICONS.upload} size={28} className="text-violet-500" />
+          <p className="text-sm font-bold text-slate-700">Click to upload or drag & drop</p>
+          <p className="text-xs text-slate-400">PNG or JPG — the flyer/announcement image for this job</p>
+        </div>
+      )}
+      <input ref={inputRef} type="file" accept="image/*" className="hidden" onChange={(e) => handleFile(e.target.files[0])} />
+    </div>
+  );
+}
+
+function JobFormFields({ form, setForm, requireCore }) {
+  return (
+    <React.Fragment>
+      <TextField label={requireCore ? "Job title" : "Job title (optional)"} required={requireCore} placeholder="e.g. Preschool Assistant Teacher" value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} />
+      <TextField label={requireCore ? "Company / organizer name" : "Company / organizer (optional)"} required={requireCore} placeholder="e.g. Brainworks International School" value={form.company} onChange={(e) => setForm({ ...form, company: e.target.value })} />
+      <div className="grid grid-cols-2 gap-4">
+        <Select label="Category" value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })}>
+          <option value="">Not specified</option>{CATEGORIES.map((c) => <option key={c}>{c}</option>)}
+        </Select>
+        <Select label="Job type" value={form.type} onChange={(e) => setForm({ ...form, type: e.target.value })}>
+          <option value="">Not specified</option>{JOB_TYPES.map((t) => <option key={t}>{t}</option>)}
+        </Select>
+      </div>
+      <div className="grid grid-cols-2 gap-4 items-end">
+        <TextField label={requireCore ? "Location" : "Location (optional)"} required={requireCore} placeholder="e.g. Yangon" value={form.location} onChange={(e) => setForm({ ...form, location: e.target.value })} />
+        <label className="flex items-center gap-2 pb-3 text-sm font-semibold text-slate-700 cursor-pointer select-none">
+          <input type="checkbox" checked={form.remote} onChange={(e) => setForm({ ...form, remote: e.target.checked })} className="rounded border-slate-300 text-violet-600 focus:ring-violet-400" />This role is remote
+        </label>
+      </div>
+      <TextField label="Pay (optional)" placeholder="e.g. Negotiable, based on experience" value={form.pay} onChange={(e) => setForm({ ...form, pay: e.target.value })} />
+      <TextArea label={requireCore ? "Description" : "Description (optional)"} required={requireCore} rows={6} placeholder="Describe the role, what you're looking for, and how to apply…" value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} />
+    </React.Fragment>
+  );
+}
+
+/* ---------- AI assistant: draft a post from a short brief ---------- */
+function AIDraftHelper({ adminUsername, adminPassword, onApply }) {
+  const [open, setOpen] = useState(false);
+  const [brief, setBrief] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+  const [draft, setDraft] = useState(null);
+
+  async function generate() {
+    if (!brief.trim()) return;
+    setLoading(true); setError(""); setDraft(null);
+    const res = await api("/ai/draft-post", { method: "POST", body: JSON.stringify({ brief, adminUsername, adminPassword }) });
+    setLoading(false);
+    if (res.ok) setDraft(res.draft);
+    else setError(res.error || "Couldn't generate a draft.");
+  }
+
+  function useDraft() {
+    onApply(draft);
+    api("/ai/feedback", { method: "POST", body: JSON.stringify({ kind: "draft-post", note: "Creator accepted the AI draft as-is.", adminUsername, adminPassword }) });
+    setOpen(false); setDraft(null); setBrief("");
+  }
+
+  return (
+    <div className="rounded-2xl border border-violet-200 bg-violet-50/60 p-4 mb-5">
+      <button type="button" onClick={() => setOpen(!open)} className="w-full flex items-center justify-between text-left">
+        <span className="flex items-center gap-2 font-bold text-violet-800 text-sm"><Sparkles size={16} /> AI Assistant — draft this post for me</span>
+        <span className="text-violet-500 text-xs font-semibold">{open ? "Hide" : "Open"}</span>
+      </button>
+      {open && (
+        <div className="mt-4 space-y-3">
+          <TextArea label="Describe the role in a few words" rows={3}
+            placeholder="e.g. weekend barista, Gulshan cafe, must be friendly, tk 400/hr"
+            value={brief} onChange={(e) => setBrief(e.target.value)} />
+          <div className="flex items-center gap-3">
+            <Button type="button" onClick={generate} disabled={loading || !brief.trim()}>{loading ? "Drafting…" : "Generate draft"}</Button>
+            {error && <span className="text-sm text-red-600 font-semibold">{error}</span>}
+          </div>
+          {draft && (
+            <div className="rounded-xl bg-white border border-slate-200 p-4 space-y-2 text-sm">
+              <p className="font-extrabold text-slate-900">{draft.title}</p>
+              <p className="text-slate-500">{draft.company} · {draft.location} {draft.remote ? "· Remote" : ""}</p>
+              <p className="text-slate-500">{draft.category} · {draft.type} {draft.pay ? `· ${draft.pay}` : ""}</p>
+              <p className="text-slate-700 whitespace-pre-line">{draft.description}</p>
+              <div className="flex gap-2 pt-2">
+                <Button type="button" onClick={useDraft}>Use this draft</Button>
+                <Button type="button" variant="ghost" onClick={() => setDraft(null)}>Discard</Button>
+              </div>
+              <p className="text-xs text-slate-400">You can still edit anything below before publishing.</p>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function PostJob({ isAdmin, user, onSubmit, setView, adminUsername, adminPassword }) {
+  const [postType, setPostType] = useState("image");
+  const [imageData, setImageData] = useState(null);
+  const [form, setForm] = useState({ title: "", company: "", category: "", type: "", location: "", remote: false, pay: "", description: "" });
+
+  if (!isAdmin && !user) {
+    return (
+      <div className="max-w-md mx-auto px-5 py-16 text-center">
+        <TSOMark size={40} />
+        <h2 className="text-xl font-bold mt-4 mb-2">Sign in required</h2>
+        <p className="text-slate-500 text-sm mb-6">Any signed-in user can publish a job post for 2 TSO coins. Creators can publish without coins.</p>
+        <Button onClick={() => setView("auth")}>Sign in</Button>
+      </div>
+    );
+  }
+
+  function submit(e) {
+    e.preventDefault();
+    if (postType === "image") {
+      if (!imageData) {
+        alert("Please upload a job post image first.");
+        return;
+      }
+      onSubmit({ postType: "image", imageData, ...form });
+    } else {
+      if (!form.title || !form.company || !form.location || !form.description) {
+        alert("Please fill in Title, Company, Location, and Description.");
+        return;
+      }
+      onSubmit({ postType: "text", imageData: null, ...form });
+    }
+  }
+
+  return (
+    <div className="max-w-2xl mx-auto px-5 py-10">
+      <div className="mb-6">
+        <div className="flex items-center gap-1.5 text-violet-600 text-xs font-bold uppercase tracking-widest mb-2"><Star size={12} /> New post</div>
+        <h1 className="text-2xl sm:text-3xl font-extrabold text-slate-900 tracking-tight">Publish a job announcement</h1>
+        <p className="text-slate-500 mt-1.5 text-sm">Upload a flyer image, write it out, or do both.</p>
+      </div>
+
+      <div className="flex gap-2 mb-6 p-1 bg-slate-100 rounded-xl max-w-xs">
+        <SegButton active={postType === "image"} onClick={() => setPostType("image")} icon="image">Image post</SegButton>
+        <SegButton active={postType === "text"} onClick={() => setPostType("text")} icon="type">Text post</SegButton>
+      </div>
+
+      {postType === "text" && (
+        <AIDraftHelper adminUsername={adminUsername} adminPassword={adminPassword}
+          onApply={(draft) => setForm({
+            title: draft.title || "", company: draft.company || "", category: draft.category || "",
+            type: draft.type || "", location: draft.location || "", remote: form.remote,
+            pay: draft.pay || "", description: draft.description || "",
+          })} />
+      )}
+      <div className={`rounded-xl border p-4 mb-5 ${isAdmin ? "border-emerald-200 bg-emerald-50" : "border-amber-200 bg-amber-50"}`}>
+        {isAdmin
+          ? <div><p className="text-sm font-bold text-emerald-800">Creator posting: free · no TSO coins required.</p><p className="text-xs text-emerald-700 mt-1">Creator-team posts publish immediately.</p></div>
+          : <div><p className="text-sm font-bold text-amber-800">Job post fee: 2 TSO coins · Your balance: {user?.tsoCoins ?? 0} TSO coins.</p><p className="text-xs text-amber-700 mt-1">🛡️ Every registered-user post is held for admin review to help remove scam, misleading, and unsafe job posts. Your post will not appear publicly until approved. If rejected, the 2-coin submission fee is refunded.</p></div>}
+      </div>
+      <form onSubmit={submit} className="bg-white rounded-2xl border border-slate-200 p-6 sm:p-8 space-y-5">
+        {postType === "image" && <ImageUploadField value={imageData} onChange={setImageData} />}
+        <JobFormFields form={form} setForm={setForm} requireCore={postType === "text"} />
+        <div className="flex gap-3 pt-1">
+          <Button type="submit">Publish post</Button>
+          <Button type="button" variant="ghost" onClick={() => setView("browse")}>Cancel</Button>
+        </div>
+      </form>
+    </div>
+  );
+}
+
+function EditJob({ job, onSubmit, onCancel, onDelete, canDelete, adminUsername, adminPassword }) {
+  const [postType, setPostType] = useState(job.postType || "text");
+  const [imageData, setImageData] = useState(job.imageData || null);
+  const [form, setForm] = useState({
+    title: job.title || "", company: job.company || "", category: job.category || "",
+    type: job.type || "", location: job.location || "", remote: !!job.remote,
+    pay: job.pay || "", description: job.description || "",
+  });
+
+  function submit(e) {
+    e.preventDefault();
+    if (postType === "image" && !imageData) return;
+    if (postType === "text" && (!form.title || !form.company || !form.location || !form.description)) return;
+    onSubmit({ ...job, postType, imageData: postType === "image" ? imageData : null, ...form });
+  }
+
+  return (
+    <div className="max-w-2xl mx-auto px-5 py-10">
+      <div className="mb-6">
+        <div className="flex items-center gap-1.5 text-amber-600 text-xs font-bold uppercase tracking-widest mb-2"><Star size={12} /> Editing as creator</div>
+        <h1 className="text-2xl sm:text-3xl font-extrabold text-slate-900 tracking-tight">Edit post</h1>
+      </div>
+      <div className="flex gap-2 mb-6 p-1 bg-slate-100 rounded-xl max-w-xs">
+        <SegButton active={postType === "image"} onClick={() => setPostType("image")} icon="image">Image post</SegButton>
+        <SegButton active={postType === "text"} onClick={() => setPostType("text")} icon="type">Text post</SegButton>
+      </div>
+      {postType === "text" && (
+        <AIDraftHelper adminUsername={adminUsername} adminPassword={adminPassword}
+          onApply={(draft) => setForm({
+            title: draft.title || "", company: draft.company || "", category: draft.category || "",
+            type: draft.type || "", location: draft.location || "", remote: form.remote,
+            pay: draft.pay || "", description: draft.description || "",
+          })} />
+      )}
+      <form onSubmit={submit} className="bg-white rounded-2xl border border-slate-200 p-6 sm:p-8 space-y-5">
+        {postType === "image" && <ImageUploadField value={imageData} onChange={setImageData} />}
+        <JobFormFields form={form} setForm={setForm} requireCore={postType === "text"} />
+        <div className="flex gap-3 pt-1 flex-wrap">
+          <Button type="submit">Save changes</Button>
+          <Button type="button" variant="ghost" onClick={onCancel}>Cancel</Button>
+          {canDelete && <Button type="button" variant="danger" className="ml-auto" onClick={() => { if (window.confirm("Delete this post? This can't be undone.")) onDelete(job.id); }}>Delete post</Button>}
+        </div>
+      </form>
+    </div>
+  );
+}
+
+function CreatorApplications({ jobs, applications, adminUsername, adminPassword, onNotify, onApplicationUpdated }) {
+  const [selected, setSelected] = useState(null);
+  const [replyText, setReplyText] = useState("");
+  const [sending, setSending] = useState(false);
+  const [replyError, setReplyError] = useState("");
+  const [screenings, setScreenings] = useState({});
+  const [screeningLoading, setScreeningLoading] = useState(null);
+  const [screeningError, setScreeningError] = useState({});
+
+  async function screenApplicant(applicationId) {
+    setScreeningLoading(applicationId);
+    setScreeningError((prev) => ({ ...prev, [applicationId]: "" }));
+    const res = await api("/ai/screen-applicant", { method: "POST", body: JSON.stringify({ applicationId, adminUsername, adminPassword }) });
+    setScreeningLoading(null);
+    if (res.ok) setScreenings((prev) => ({ ...prev, [applicationId]: res.screening }));
+    else setScreeningError((prev) => ({ ...prev, [applicationId]: res.error || "Couldn't screen this applicant." }));
+  }
+
+  function sendScreeningFeedback(applicationId, useful) {
+    api("/ai/feedback", { method: "POST", body: JSON.stringify({
+      kind: "screen-applicant",
+      note: useful ? "Creator found this screening useful." : "Creator found this screening not useful / inaccurate.",
+      adminUsername, adminPassword,
+    }) });
+    onNotify(useful ? "Thanks — noted." : "Thanks, the assistant will factor that in.");
+  }
+
+  async function sendReply(applicationId) {
+    const text = replyText.trim();
+    if (!text) return;
+    setSending(true); setReplyError("");
+    const res = await api(`/applications/${encodeURIComponent(applicationId)}/reply`, { method: "POST", body: JSON.stringify({ username: adminUsername, password: adminPassword, message: text }) });
+    setSending(false);
+    if (res.ok) {
+      setReplyText("");
+      onNotify("Message sent to applicant.");
+      onApplicationUpdated(res.application);
+    }
+    else setReplyError(res.error || "Could not send message.");
+  }
+
+  return (
+    <div className="max-w-5xl mx-auto px-5 py-10">
+      <div className="mb-7"><div className="flex items-center gap-2 text-violet-600 text-xs font-bold uppercase tracking-widest mb-2"><Star size={12} /> Creator only</div><h1 className="text-2xl sm:text-3xl font-extrabold text-slate-900 tracking-tight">Job applications</h1><p className="text-slate-500 text-sm mt-1">Review applications and message applicants about their application.</p></div>
+      {applications.length === 0 ? <div className="bg-white rounded-2xl border border-dashed border-slate-200 p-10 text-center text-slate-400">No applications yet.</div> :
+        <div className="space-y-3">{applications.map((a) => {
+          const job = jobs.find((j) => j.id === a.jobId); const open = selected === a.id;
+          return <div key={a.id} className="bg-white rounded-2xl border border-slate-200 overflow-hidden">
+            <button className="w-full text-left p-5 flex items-center justify-between gap-4 hover:bg-slate-50" onClick={() => { setSelected(open ? null : a.id); setReplyError(""); }}><div className="min-w-0"><p className="font-extrabold text-slate-900">{a.name}</p><p className="text-sm text-slate-500 truncate">{job?.title || "Job announcement"} · {a.email}</p></div><Badge tone="violet">{a.status || "Submitted"}</Badge></button>
+            {open && <div className="border-t border-slate-100 p-5 space-y-5 text-sm">
+              <div className="grid sm:grid-cols-2 gap-5"><div className="space-y-2"><p><strong>Name:</strong> {a.name}</p><p><strong>Email:</strong> <a className="text-violet-700 font-semibold" href={`mailto:${a.email}`}>{a.email}</a></p><p><strong>Phone:</strong> {a.phone || "—"}</p><p><strong>Applied:</strong> {new Date(a.appliedAt).toLocaleString()}</p><p><strong>Job:</strong> {job?.title || "Job announcement"}</p></div><div className="space-y-3">{a.cvData && <a href={a.cvData} download={a.cvName || "CV"} className="inline-flex items-center justify-center rounded-xl px-4 py-3 font-bold text-white" style={{ background: "linear-gradient(135deg, #1e1b6e 0%, #7c3aed 100%)" }}>Download CV · {a.cvName || "CV"}</a>}{a.portfolio && <p><strong>Portfolio:</strong> <a className="text-violet-700 break-all" href={a.portfolio} target="_blank" rel="noreferrer">{a.portfolio}</a></p>}{a.message && <p><strong>Applicant message:</strong><br /><span className="text-slate-600 whitespace-pre-line">{a.message}</span></p>}</div></div>
+              {a.replies?.length > 0 && <div className="space-y-2"><p className="font-bold text-violet-700">Conversation</p>{a.replies.map((r) => <div key={r.id} className="rounded-xl bg-slate-50 border border-slate-200 p-3"><p className="whitespace-pre-line text-slate-700">{r.message}</p><p className="text-xs text-slate-400 mt-1">{new Date(r.sentAt).toLocaleString()}</p></div>)}</div>}
+              <div className="rounded-xl border border-violet-200 bg-violet-50/60 p-4">
+                <div className="flex items-center justify-between gap-3 mb-1">
+                  <p className="font-bold text-violet-800 flex items-center gap-2"><Sparkles size={15} /> AI screening</p>
+                  {!screenings[a.id] && <Button type="button" variant="ghost" onClick={() => screenApplicant(a.id)} disabled={screeningLoading === a.id}>{screeningLoading === a.id ? "Reading…" : "Ask AI"}</Button>}
+                </div>
+                {screeningError[a.id] && <p className="text-sm text-red-600 font-semibold">{screeningError[a.id]}</p>}
+                {screenings[a.id] && (
+                  <div className="space-y-2 text-sm mt-2">
+                    <p className="text-slate-700">{screenings[a.id].summary}</p>
+                    {screenings[a.id].strengths?.length > 0 && <div><p className="text-xs font-bold uppercase tracking-wide text-emerald-700">Strengths</p><ul className="list-disc list-inside text-slate-600">{screenings[a.id].strengths.map((s, i) => <li key={i}>{s}</li>)}</ul></div>}
+                    {screenings[a.id].gaps_or_questions?.length > 0 && <div><p className="text-xs font-bold uppercase tracking-wide text-amber-700">Gaps / questions</p><ul className="list-disc list-inside text-slate-600">{screenings[a.id].gaps_or_questions.map((s, i) => <li key={i}>{s}</li>)}</ul></div>}
+                    {screenings[a.id].suggested_next_step && <p className="text-slate-700"><strong>Suggested next step:</strong> {screenings[a.id].suggested_next_step}</p>}
+                    <div className="flex items-center gap-3 pt-1">
+                      <span className="text-xs text-slate-400">Helpful?</span>
+                      <button type="button" onClick={() => sendScreeningFeedback(a.id, true)} className="text-xs font-bold text-emerald-700 hover:underline">Yes</button>
+                      <button type="button" onClick={() => sendScreeningFeedback(a.id, false)} className="text-xs font-bold text-red-600 hover:underline">No</button>
+                    </div>
+                  </div>
+                )}
+              </div>
+              <div className="rounded-xl bg-violet-50 border border-violet-100 p-4"><p className="font-bold text-slate-800 mb-2">Reply to applicant</p><textarea value={replyText} onChange={e => setReplyText(e.target.value)} rows={4} maxLength={5000} placeholder="Write a message about the application…" className="w-full rounded-xl border border-slate-200 bg-white px-3 py-3 outline-none focus:border-violet-400 resize-y" /><div className="flex items-center justify-between gap-3 mt-3"><span className="text-xs text-slate-400">The applicant will see this in their dashboard.</span><Button onClick={() => sendReply(a.id)} disabled={sending || !replyText.trim()}>{sending ? "Sending…" : "Send message"}</Button></div>{replyError && <p className="text-sm text-red-600 font-semibold mt-2">{replyError}</p>}</div>
+            </div>}
+          </div>;
+        })}</div>}
+    </div>
+  );
+}
+
+function Tasks({ user, onUserUpdated }) {
+  const [data, setData] = useState(null); const [loading, setLoading] = useState(true); const [error, setError] = useState("");
+  async function load() { const res = await api("/tasks?token=" + encodeURIComponent(user.token)); if (res.ok) { setData(res); onUserUpdated(prev => prev ? { ...prev, tsoCoins: res.tsoCoins } : prev); setError(""); } else setError(res.error || "Could not load tasks."); setLoading(false); }
+  useEffect(() => { setLoading(true); load(); }, [user.token]);
+  if (loading) return <div className="max-w-4xl mx-auto px-5 py-12 text-sm text-slate-400">Loading TSO tasks…</div>;
+  if (error) return <div className="max-w-4xl mx-auto px-5 py-12 text-sm font-semibold text-red-600">{error}</div>;
+  return <div className="max-w-4xl mx-auto px-5 py-10 space-y-6">
+    <div><h1 className="text-2xl sm:text-3xl font-extrabold text-slate-900">Tasks & TSO Coins</h1><p className="text-slate-500 text-sm mt-1">Earn free TSO coins by completing tasks. A normal-user job post costs {data.jobPostCost} coins.</p></div>
+    <div className="rounded-2xl p-6 text-white shadow-lg" style={{background:"linear-gradient(135deg,#1e1b6e 0%,#7c3aed 100%)"}}><p className="text-xs font-bold uppercase tracking-widest text-violet-200">Your balance</p><p className="text-4xl font-extrabold mt-1">{data.tsoCoins} <span className="text-lg">TSO</span></p></div>
+    <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden"><div className="px-5 py-4 border-b border-slate-100"><h2 className="font-extrabold">Available tasks</h2></div>{data.tasks.map(t => <div key={t.id} className="p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4"><div><p className="font-bold text-slate-900">{t.title}</p><p className="text-sm text-slate-500 mt-1">{t.description}</p></div><Badge tone={t.claimed ? "green" : "violet"}>{t.claimed ? "Claimed today" : `+${t.reward} TSO`}</Badge></div>)}</div>
+    <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden"><div className="px-5 py-4 border-b border-slate-100"><h2 className="font-extrabold">Coin history</h2></div>{data.transactions.length === 0 ? <p className="p-5 text-sm text-slate-400">No coin transactions yet.</p> : <div className="divide-y divide-slate-100">{data.transactions.map(x => <div key={x.id} className="px-5 py-3 flex items-center justify-between"><div><p className="font-semibold text-slate-800">{x.reason === "daily_login" ? "Daily login reward" : x.reason === "creator_grant" ? "Creator reward" : "Job post"}</p><p className="text-xs text-slate-400">{fmtDate(x.createdAt)}</p></div><span className={`font-extrabold ${x.amount > 0 ? "text-emerald-600" : "text-red-600"}`}>{x.amount > 0 ? "+" : ""}{x.amount}</span></div>)}</div>}</div>
+  </div>;
+}
+
+function Dashboard({ user, jobs, applications, onSelectJob }) {
+  return (
+    <div className="max-w-4xl mx-auto px-5 py-10">
+      <h1 className="text-2xl font-extrabold text-slate-900 tracking-tight mb-1">Your dashboard</h1>
+      <p className="text-slate-500 text-sm mb-8">Signed in as {user.displayName} ({user.username})</p>
+      <h2 className="font-bold text-slate-800 mb-3 flex items-center gap-2"><Star size={14} className="text-violet-500" /> Your applications ({applications.length})</h2>
+      {applications.length === 0 ? (
+        <p className="text-sm text-slate-400 bg-white rounded-xl border border-dashed border-slate-200 p-5">You haven't applied to any roles yet.</p>
+      ) : (
+        <div className="space-y-3">
+          {applications.map((a) => {
+            const job = jobs.find((j) => j.id === a.jobId);
+            if (!job) return null;
+            return (
+              <div key={a.id} className="bg-white rounded-xl border border-slate-200 p-4">
+                <button onClick={() => onSelectJob(job)} className="w-full text-left hover:bg-slate-50 rounded-lg p-1">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0"><p className="font-semibold text-slate-800 text-sm truncate">{job.title || "Job Announcement"}</p><p className="text-xs text-slate-400 mt-1">{job.company ? `${job.company} · ` : ""}Applied {fmtDate(a.appliedAt)}</p></div>
+                    <Badge tone={a.status === "Creator replied" ? "violet" : "amber"}>{a.status || "Submitted"}</Badge>
+                  </div>
+                </button>
+                {a.replies?.length > 0 && (
+                  <div className="mt-4 border-t border-slate-100 pt-4 space-y-3">
+                    <p className="text-xs font-extrabold uppercase tracking-wider text-violet-600">Messages from creator</p>
+                    {a.replies.map((r) => <div key={r.id} className="rounded-xl bg-violet-50 border border-violet-100 p-3"><p className="text-sm text-slate-700 whitespace-pre-line">{r.message}</p><p className="text-xs text-slate-400 mt-2">{fmtDate(r.sentAt)}</p></div>)}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ---------- Sign in / Sign up (real backend calls) ---------- */
+function Auth({ onAuthed, setView, setAuthMode, initialMode = "signin" }) {
+  const [mode, setMode] = useState(initialMode);
+  useEffect(() => { setMode(initialMode); }, [initialMode]); // signin | signup | forgot-question | forgot-reset | verify-email
+  const [username, setUsername] = useState("");
+  const [loginEmail, setLoginEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [displayName, setDisplayName] = useState("");
+  const [phone, setPhone] = useState("");
+  const [phoneCountry, setPhoneCountry] = useState("MM");
+  const [dateOfBirth, setDateOfBirth] = useState("");
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [googleClientId, setGoogleClientId] = useState("");
+  const [email, setEmail] = useState("");
+  const [securityQuestion, setSecurityQuestion] = useState("What was the name of your first school?");
+  const [securityAnswer, setSecurityAnswer] = useState("");
+  const [agreedToTerms, setAgreedToTerms] = useState(false);
+  const [recoveryQuestion, setRecoveryQuestion] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [verificationUsername, setVerificationUsername] = useState("");
+
+  async function submitSignin(e) {
+    e.preventDefault();
+    setError(""); setLoading(true);
+    const res = await api("/auth/signin", { method: "POST", body: JSON.stringify({ email: loginEmail, password }) });
+    setLoading(false);
+    if (res.ok) { passwordForUnifiedCreatorLogin = password; onAuthed({ ...res.user, token: res.token }); }
+    else if (res.needsVerification) { setVerificationUsername(res.loginEmail || loginEmail); setMode("verify-email"); setError(res.error || "Please verify your email first."); }
+    else setError(res.error || "Sign in failed.");
+  }
+
+  async function submitSignup(e) {
+    e.preventDefault();
+    setError(""); setLoading(true);
+    const res = await api("/auth/signup", { method: "POST", body: JSON.stringify({ username, password, displayName: displayName || username, email, phone, phoneCountry, dateOfBirth, securityQuestion, securityAnswer, source: "manual", agreedToTerms, termsVersion: TERMS_VERSION, privacyVersion: PRIVACY_VERSION }) });
+    setLoading(false);
+    if (res.ok) { setVerificationUsername(res.user.username); setMode("verify-email"); setError(""); }
+    else setError(res.error || "Sign up failed.");
+  }
+
+  async function startForgot(e) {
+    e.preventDefault(); setError(""); setLoading(true);
+    const res = await api("/auth/forgot/question", { method: "POST", body: JSON.stringify({ email: loginEmail }) });
+    setLoading(false);
+    if (res.ok) { setRecoveryQuestion(res.question); setMode("forgot-reset"); }
+    else setError(res.error || "Could not find that account.");
+  }
+  async function finishForgot(e) {
+    e.preventDefault(); setError(""); setLoading(true);
+    const res = await api("/auth/forgot/reset", { method: "POST", body: JSON.stringify({ email: loginEmail, securityAnswer, newPassword }) });
+    setLoading(false);
+    if (res.ok) { setMode("signin"); setPassword(""); setNewPassword(""); setSecurityAnswer(""); setError("Password reset successfully. You can sign in now."); }
+    else setError(res.error || "Password reset failed.");
+  }
+
+  // Fetch the Google OAuth Client ID from the backend (kept out of the
+  // frontend source so it can be changed in Render without redeploying).
+  useEffect(() => {
+    api("/auth/google-config").then((res) => { if (res.ok && res.clientId) setGoogleClientId(res.clientId); });
+  }, []);
+
+  // Render the real "Sign in with Google" button once the client ID is
+  // known and Google's script has loaded. Handles both sign-in and sign-up
+  // in one flow: Google verifies the email for us.
+  const googleButtonRef = useRef(null);
+  useEffect(() => {
+    if (!googleClientId || !(mode === "signin" || mode === "signup")) return;
+
+    const renderGoogleButton = () => {
+      if (!window.google || !window.google.accounts || !window.google.accounts.id || !googleButtonRef.current) return false;
+      window.google.accounts.id.initialize({
+        client_id: googleClientId,
+        callback: async (response) => {
+          setError(""); setLoading(true);
+          const res = await api("/auth/google", { method: "POST", body: JSON.stringify({ credential: response.credential }) });
+          setLoading(false);
+          if (res.ok) onAuthed({ ...res.user, token: res.token });
+          else setError(res.error || "Google sign-in failed.");
+        },
+      });
+      googleButtonRef.current.innerHTML = "";
+      window.google.accounts.id.renderButton(googleButtonRef.current, {
+        theme: "outline", size: "large", width: 320,
+        text: mode === "signup" ? "signup_with" : "signin_with",
+      });
+      return true;
+    };
+
+    if (renderGoogleButton()) return;
+    const timer = setInterval(() => {
+      if (renderGoogleButton()) clearInterval(timer);
+    }, 250);
+    return () => clearInterval(timer);
+  }, [googleClientId, mode]);
+
+  return (
+    <div className="max-w-sm mx-auto px-5 py-14">
+      <div className="text-center mb-7">
+        <div className="inline-flex"><TSOMark size={40} /></div>
+        <h1 className="text-xl font-extrabold text-slate-900 mt-3">
+          {mode === "signin" ? "Welcome back" : mode === "signup" ? "Create your account" : mode === "forgot-question" ? "Reset your password" : mode === "forgot-reset" ? "Answer your security question" : mode === "verify-email" ? "Verify your email" : "Set a password"}
+        </h1>
+        <p className="text-slate-500 text-sm mt-1">
+          {mode === "signin" ? "Sign in to apply for roles." : mode === "signup" ? "Sign up to apply for roles." : mode === "forgot-question" || mode === "forgot-reset" ? "Recover your account securely." : mode === "verify-email" ? "Check your inbox to activate your account." : "One more step to finish setting up your account."}
+        </p>
+      </div>
+
+      <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-sm">
+        {mode === "signin" && (
+          <React.Fragment>
+            <form onSubmit={submitSignin} className="space-y-4">
+              <TextField label="Talentshowoff email" required value={loginEmail} onChange={(e) => setLoginEmail(e.target.value.toLowerCase())} placeholder="yourname@talentshowoff.com" type="email" autoCapitalize="none" autoCorrect="off" hint="Use your Talentshowoff email instead of your username." />
+              <TextField label="Password" type="password" required value={password} onChange={(e) => setPassword(e.target.value)} />
+              {error && <p className="text-sm text-red-600 font-semibold">{error}</p>}
+              <Button type="submit" className="w-full" disabled={loading}>{loading ? "Checking…" : "Sign in"}</Button>
+            </form>
+            <button type="button" onClick={() => { setMode("forgot-question"); setError(""); }} className="w-full text-sm font-bold text-violet-600 hover:text-violet-800 mt-3">Forgot password?</button>
+            {googleClientId && (
+              <React.Fragment>
+                <div className="flex items-center gap-3 my-5"><div className="h-px bg-slate-200 flex-1" /><span className="text-xs text-slate-400 font-semibold">OR</span><div className="h-px bg-slate-200 flex-1" /></div>
+                <div className="flex justify-center"><div ref={googleButtonRef} /></div>
+              </React.Fragment>
+            )}
+          </React.Fragment>
+        )}
+
+        {mode === "forgot-question" && (
+          <form onSubmit={startForgot} className="space-y-4">
+            <TextField label="Talentshowoff email" required value={loginEmail} onChange={(e) => setLoginEmail(e.target.value.toLowerCase())} placeholder="yourname@talentshowoff.com" type="email" autoCapitalize="none" autoCorrect="off" hint="Use your Talentshowoff email instead of your username." />
+            {error && <p className="text-sm text-red-600 font-semibold">{error}</p>}
+            <Button type="submit" className="w-full" disabled={loading}>{loading ? "Looking up…" : "Continue"}</Button>
+            <Button type="button" variant="ghost" className="w-full" onClick={() => { setMode("signin"); setError(""); }}>Back to sign in</Button>
+          </form>
+        )}
+
+        {mode === "forgot-reset" && (
+          <form onSubmit={finishForgot} className="space-y-4">
+            <div className="bg-violet-50 border border-violet-100 rounded-xl p-4 text-sm font-semibold text-violet-900">{recoveryQuestion}</div>
+            <TextField label="Security answer" required value={securityAnswer} onChange={(e) => setSecurityAnswer(e.target.value)} autoFocus />
+            <TextField label="New password" type="password" required value={newPassword} onChange={(e) => setNewPassword(e.target.value)} hint="At least 6 characters" />
+            {error && <p className="text-sm text-red-600 font-semibold">{error}</p>}
+            <Button type="submit" className="w-full" disabled={loading}>{loading ? "Resetting…" : "Reset password"}</Button>
+          </form>
+        )}
+
+        {mode === "verify-email" && (
+          <div className="space-y-4">
+            <div className="bg-violet-50 border border-violet-100 rounded-xl p-4 text-sm text-violet-900 leading-relaxed">
+              We sent a secure verification link to your email. Open it to activate your account, then return here to sign in.
+            </div>
+            <Button type="button" className="w-full" onClick={async () => {
+              setError(""); setLoading(true);
+              const res = await api("/auth/resend-verification", { method: "POST", body: JSON.stringify({ email: verificationUsername }) });
+              setLoading(false);
+              setError(res.ok ? "A new verification email has been sent." : (res.error || "Could not resend the email."));
+            }} disabled={loading}>{loading ? "Sending…" : "Resend verification email"}</Button>
+            <Button type="button" variant="ghost" className="w-full" onClick={() => { setMode("signin"); setError(""); }}>Back to sign in</Button>
+            {error && <p className="text-sm font-semibold text-slate-600">{error}</p>}
+          </div>
+        )}
+
+        {mode === "signup" && (
+          <React.Fragment>
+            <form onSubmit={submitSignup} className="space-y-4">
+              <TextField label="Display name" required value={displayName} onChange={(e) => setDisplayName(e.target.value)} placeholder="Jordan Rivera" />
+              <TextField label="Email name (username)" required value={username} onChange={(e) => setUsername(e.target.value)} placeholder="jordan.rivera" hint={`Your sign-in email will be ${username || "jordan.rivera"}@talentshowoff.com. Use Gmail/another email below for verification.`} autoCapitalize="none" autoCorrect="off" />
+              <TextField label="Email" type="email" required value={email} onChange={(e) => setEmail(e.target.value)} placeholder="you@example.com" />
+              <div className="grid grid-cols-[1fr_1.6fr] gap-3">
+                <Select label="Country" required value={phoneCountry} onChange={(e) => setPhoneCountry(e.target.value)}>
+                  {PHONE_COUNTRIES.map(([code, label]) => <option key={code} value={code}>{label}</option>)}
+                </Select>
+                <TextField label="Phone number" type="tel" required value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="09 123 456 789" hint="Length and format are checked for the selected country." />
+              </div>
+              <TextField label="Date of birth" type="date" required value={dateOfBirth} onChange={(e) => setDateOfBirth(e.target.value)} />
+              <Select label="Security question" value={securityQuestion} onChange={(e) => setSecurityQuestion(e.target.value)}>
+                <option>What was the name of your first school?</option>
+                <option>What city were you born in?</option>
+                <option>What was your childhood nickname?</option>
+                <option>What was the name of your first pet?</option>
+              </Select>
+              <TextField label="Security answer" required value={securityAnswer} onChange={(e) => setSecurityAnswer(e.target.value)} hint="Used to recover your account if you forget your password." />
+              <TextField label="Password" type="password" required value={password} onChange={(e) => setPassword(e.target.value)} hint="At least 6 characters" />
+              <AgreementBox checked={agreedToTerms} onChange={setAgreedToTerms} onTerms={() => { setAuthMode("signup"); setView("terms"); }} onPrivacy={() => { setAuthMode("signup"); setView("privacy"); }} />
+              {error && <p className="text-sm text-red-600 font-semibold">{error}</p>}
+              <Button type="submit" className="w-full" disabled={loading || !agreedToTerms}>{loading ? "Creating…" : "Create account"}</Button>
+            </form>
+            {googleClientId && (
+              <React.Fragment>
+                <div className="flex items-center gap-3 my-5"><div className="h-px bg-slate-200 flex-1" /><span className="text-xs text-slate-400 font-semibold">OR</span><div className="h-px bg-slate-200 flex-1" /></div>
+                <div className="flex justify-center"><div ref={googleButtonRef} /></div>
+              </React.Fragment>
+            )}
+          </React.Fragment>
+        )}
+      </div>
+
+      {(mode === "signin" || mode === "signup") && (
+        <p className="text-center text-sm text-slate-500 mt-5">
+          {mode === "signin" ? "New here?" : "Already have an account?"}{" "}
+          <button onClick={() => { setMode(mode === "signin" ? "signup" : "signin"); setError(""); }} className="font-bold text-violet-600 hover:text-violet-800">
+            {mode === "signin" ? "Create an account" : "Sign in"}
+          </button>
+        </p>
+      )}
+    </div>
+  );
+}
+
+function resizeImageFile(file, maxSize = 512, quality = 0.82) {
+  return new Promise((resolve, reject) => {
+    if (!file.type.startsWith("image/")) return reject(new Error("Not an image"));
+    const reader = new FileReader();
+    reader.onerror = reject;
+    reader.onload = () => {
+      const img = new Image();
+      img.onerror = reject;
+      img.onload = () => {
+        const scale = Math.min(1, maxSize / Math.max(img.width, img.height));
+        const canvas = document.createElement("canvas");
+        canvas.width = Math.max(1, Math.round(img.width * scale));
+        canvas.height = Math.max(1, Math.round(img.height * scale));
+        const ctx = canvas.getContext("2d");
+        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+        resolve(canvas.toDataURL("image/jpeg", quality));
+      };
+      img.src = reader.result;
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
+function AgreementBox({ checked, onChange, onTerms, onPrivacy }) {
+  return (
+    <label className="flex items-start gap-3 rounded-xl border border-slate-200 bg-slate-50 p-4 cursor-pointer">
+      <input type="checkbox" checked={checked} onChange={(e) => onChange(e.target.checked)} className="mt-1 h-4 w-4 accent-violet-600" />
+      <span className="text-sm text-slate-600 leading-6">
+        I agree to the <button type="button" onClick={(e) => { e.preventDefault(); onTerms(); }} className="font-bold text-violet-600 hover:underline">Terms of Service</button> and <button type="button" onClick={(e) => { e.preventDefault(); onPrivacy(); }} className="font-bold text-violet-600 hover:underline">Privacy Policy</button>. I understand that an account will only be created after I accept both documents.
+      </span>
+    </label>
+  );
+}
+
+function Mail({ user, onNotify }) {
+  const [loading, setLoading] = useState(true);
+  const [configured, setConfigured] = useState(true);
+  const [hasMailbox, setHasMailbox] = useState(false);
+  const [mailbox, setMailbox] = useState(null);
+  const [localPart, setLocalPart] = useState("");
+  const [settingUp, setSettingUp] = useState(false);
+  const [setupError, setSetupError] = useState("");
+
+  const [folders, setFolders] = useState([]);
+  const [activeFolder, setActiveFolder] = useState("Inbox");
+  const [messages, setMessages] = useState([]);
+  const [loadingMessages, setLoadingMessages] = useState(false);
+  const [selected, setSelected] = useState(null);
+  const [composing, setComposing] = useState(false);
+
+  const checkStatus = useCallback(async () => {
+    setLoading(true);
+    const res = await api("/mail/status", { headers: { Authorization: `Bearer ${user.token}` } });
+    setLoading(false);
+    if (!res.ok) return;
+    setConfigured(res.configured);
+    setHasMailbox(res.hasMailbox);
+    if (res.hasMailbox) setMailbox(res.mailbox);
+  }, [user.token]);
+
+  useEffect(() => { checkStatus(); }, [checkStatus]);
+
+  const loadFolders = useCallback(async () => {
+    const res = await api("/mail/folders", { headers: { Authorization: `Bearer ${user.token}` } });
+    if (res.ok) setFolders(res.folders);
+  }, [user.token]);
+
+  const loadMessages = useCallback(async (folderName) => {
+    setLoadingMessages(true);
+    const res = await api("/mail/messages?folder=" + encodeURIComponent(folderName), { headers: { Authorization: `Bearer ${user.token}` } });
+    setLoadingMessages(false);
+    if (res.ok) setMessages(res.messages);
+  }, [user.token]);
+
+  useEffect(() => { if (hasMailbox) { loadFolders(); loadMessages(activeFolder); } }, [hasMailbox, loadFolders]);
+  useEffect(() => { if (hasMailbox) loadMessages(activeFolder); }, [activeFolder]);
+
+  async function openMessage(id) {
+    const res = await api("/mail/messages/" + id, { headers: { Authorization: `Bearer ${user.token}` } });
+    if (res.ok) {
+      setSelected(res.message);
+      setMessages((prev) => prev.map((m) => m.id === id ? { ...m, isRead: true } : m));
+    }
+  }
+
+  async function toggleStar(m, e) {
+    e.stopPropagation();
+    const next = !m.isStarred;
+    setMessages((prev) => prev.map((x) => x.id === m.id ? { ...x, isStarred: next } : x));
+    await api("/mail/messages/" + m.id + "/star", { method: "POST", headers: { Authorization: `Bearer ${user.token}` }, body: JSON.stringify({ starred: next }) });
+  }
+
+  async function moveMessage(id, folderName) {
+    const res = await api("/mail/messages/" + id + "/move", { method: "POST", headers: { Authorization: `Bearer ${user.token}` }, body: JSON.stringify({ folder: folderName }) });
+    if (res.ok) {
+      onNotify(`Moved to ${folderName}.`);
+      setSelected(null);
+      loadMessages(activeFolder);
+      loadFolders();
+    }
+  }
+
+  async function setupMailbox(e) {
+    e.preventDefault();
+    setSetupError("");
+    setSettingUp(true);
+    const res = await api("/mail/setup", { method: "POST", headers: { Authorization: `Bearer ${user.token}` }, body: JSON.stringify({ localPart }) });
+    setSettingUp(false);
+    if (res.ok) {
+      setHasMailbox(true);
+      setMailbox(res.mailbox);
+      onNotify(`Mailbox created: ${res.mailbox.address}`);
+    } else {
+      setSetupError(res.error || "Could not create your mailbox.");
+    }
+  }
+
+  if (loading) {
+    return <div className="max-w-3xl mx-auto px-5 py-16 text-center text-slate-400 text-sm">Loading mail…</div>;
+  }
+
+  if (!configured) {
+    return (
+      <div className="max-w-2xl mx-auto px-5 py-16 text-center">
+        <div className="w-14 h-14 rounded-2xl bg-violet-100 text-violet-700 flex items-center justify-center mx-auto mb-4"><Icon path={ICONS.mail} size={26} /></div>
+        <h1 className="text-xl font-extrabold text-slate-900">Creator Mail isn't set up yet</h1>
+        <p className="text-sm text-slate-500 mt-2">The site owner hasn't configured the mail feature on this deployment yet. Check back later.</p>
+      </div>
+    );
+  }
+
+  if (!hasMailbox) {
+    return (
+      <div className="max-w-lg mx-auto px-5 py-16">
+        <div className="text-center mb-6">
+          <div className="w-14 h-14 rounded-2xl bg-violet-100 text-violet-700 flex items-center justify-center mx-auto mb-4"><Icon path={ICONS.mail} size={26} /></div>
+          <h1 className="text-xl font-extrabold text-slate-900">Create your Talentshowoff mailbox</h1>
+          <p className="text-sm text-slate-500 mt-2">Optional — get a @talentshowoff.com address to message creators and applicants directly.</p>
+        </div>
+        <form onSubmit={setupMailbox} className="bg-white rounded-2xl border border-slate-200 p-6 shadow-sm space-y-4">
+          <TextField label="Choose your mailbox name" value={localPart} onChange={(e) => setLocalPart(e.target.value.toLowerCase())}
+            placeholder={user.username} hint="Lowercase letters, numbers, dots, underscores, hyphens. This will be yourname@talentshowoff.com." />
+          {setupError && <div className="text-sm font-semibold text-red-600">{setupError}</div>}
+          <Button type="submit" variant="primary" disabled={settingUp} className="w-full">{settingUp ? "Creating…" : "Create mailbox"}</Button>
+        </form>
+      </div>
+    );
+  }
+
+  return (
+    <div className="max-w-6xl mx-auto px-5 py-8">
+      <div className="flex items-center justify-between mb-6 flex-wrap gap-3">
+        <div>
+          <h1 className="text-2xl font-extrabold text-slate-900">Mail</h1>
+          <p className="text-sm text-slate-500 mt-0.5">{mailbox?.address}</p>
+        </div>
+        <Button variant="primary" onClick={() => { setComposing(true); setSelected(null); }}>+ Compose</Button>
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-[180px_1fr] gap-5">
+        <div className="flex md:flex-col gap-1.5 overflow-x-auto md:overflow-visible pb-2 md:pb-0">
+          {folders.map((f) => (
+            <button key={f.id} onClick={() => { setActiveFolder(f.name); setSelected(null); setComposing(false); }}
+              className={`flex items-center justify-between gap-2 shrink-0 px-3 py-2 rounded-lg text-sm font-bold text-left transition ${activeFolder === f.name ? "bg-violet-50 text-violet-700" : "text-slate-600 hover:bg-slate-100"}`}>
+              <span>{f.name}</span>
+              {f.unread > 0 && <Badge tone="violet">{f.unread}</Badge>}
+            </button>
+          ))}
+        </div>
+
+        <div className="bg-white rounded-2xl border border-slate-200 shadow-sm min-h-[420px]">
+          {composing ? (
+            <ComposeMail user={user} mailbox={mailbox} onSent={() => { setComposing(false); setActiveFolder("Sent"); loadFolders(); }} onCancel={() => setComposing(false)} />
+          ) : selected ? (
+            <MessageView message={selected} onBack={() => setSelected(null)} onMove={moveMessage} onReply={() => setComposing(true)} activeFolder={activeFolder} />
+          ) : (
+            <div className="divide-y divide-slate-100">
+              {loadingMessages ? (
+                <div className="text-center text-slate-400 text-sm py-16">Loading…</div>
+              ) : messages.length === 0 ? (
+                <div className="text-center text-slate-400 text-sm py-16">No messages in {activeFolder}.</div>
+              ) : messages.map((m) => (
+                <div key={m.id} className={`w-full px-5 py-4 flex items-start gap-3 hover:bg-slate-50 transition ${!m.isRead ? "bg-violet-50/40" : ""}`}>
+                  <button type="button" onClick={(e) => toggleStar(m, e)} className={`mt-0.5 shrink-0 ${m.isStarred ? "text-amber-400" : "text-slate-300 hover:text-slate-400"}`}>
+                    <Icon path={ICONS.star} size={16} />
+                  </button>
+                  <button type="button" onClick={() => openMessage(m.id)} className="min-w-0 flex-1 text-left">
+                    <div className="flex items-center justify-between gap-3">
+                      <span className={`text-sm truncate ${!m.isRead ? "font-extrabold text-slate-900" : "font-semibold text-slate-700"}`}>{m.fromName || m.fromAddress}</span>
+                      <span className="text-xs text-slate-400 shrink-0">{new Date(m.sentAt || m.createdAt).toLocaleDateString()}</span>
+                    </div>
+                    <div className={`text-sm truncate ${!m.isRead ? "font-bold text-slate-800" : "text-slate-600"}`}>{m.subject}</div>
+                    <div className="text-xs text-slate-400 truncate mt-0.5">{m.preview}</div>
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function MessageView({ message, onBack, onMove, onReply, activeFolder }) {
+  return (
+    <div className="p-6">
+      <button onClick={onBack} className="text-sm font-bold text-slate-500 hover:text-slate-700 mb-4">&larr; Back</button>
+      <h2 className="text-lg font-extrabold text-slate-900">{message.subject}</h2>
+      <div className="text-sm text-slate-500 mt-1">From {message.fromName ? `${message.fromName} <${message.fromAddress}>` : message.fromAddress}</div>
+      <div className="text-xs text-slate-400 mt-0.5">To {message.toAddresses.join(", ")} · {new Date(message.sentAt || message.createdAt).toLocaleString()}</div>
+      <div className="flex items-center gap-2 mt-4 mb-5">
+        <Button variant="outline" className="!px-3.5 !py-2 text-[13px]" onClick={onReply}><Icon path={ICONS.reply} size={14} />Reply</Button>
+        {activeFolder !== "Trash" && <Button variant="outline" className="!px-3.5 !py-2 text-[13px]" onClick={() => onMove(message.id, "Trash")}><Icon path={ICONS.trash} size={14} />Delete</Button>}
+      </div>
+      <div className="border-t border-slate-100 pt-5 text-sm text-slate-800 leading-relaxed"
+        dangerouslySetInnerHTML={{ __html: message.bodyHtml || (message.bodyText || "").replace(/\n/g, "<br>") }} />
+    </div>
+  );
+}
+
+function ComposeMail({ user, mailbox, onSent, onCancel }) {
+  const [to, setTo] = useState("");
+  const [subject, setSubject] = useState("");
+  const [body, setBody] = useState("");
+  const [sending, setSending] = useState(false);
+  const [error, setError] = useState("");
+
+  async function send(e) {
+    e.preventDefault();
+    setError(""); setSending(true);
+    const res = await api("/mail/send", {
+      method: "POST", headers: { Authorization: `Bearer ${user.token}` },
+      body: JSON.stringify({ action: "send", to, subject, body: body.replace(/\n/g, "<br>") }),
+    });
+    setSending(false);
+    if (res.ok) onSent();
+    else setError(res.error || "Could not send your message.");
+  }
+
+  return (
+    <form onSubmit={send} className="p-6 space-y-4">
+      <div className="flex items-center justify-between">
+        <h2 className="text-lg font-extrabold text-slate-900">New message</h2>
+        <button type="button" onClick={onCancel} className="text-sm font-bold text-slate-500 hover:text-slate-700">Cancel</button>
+      </div>
+      <TextField label="To" value={to} onChange={(e) => setTo(e.target.value)} placeholder="someone@example.com, another@example.com" required />
+      <TextField label="Subject" value={subject} onChange={(e) => setSubject(e.target.value)} />
+      <TextArea label="Message" rows={10} value={body} onChange={(e) => setBody(e.target.value)} />
+      {error && <div className="text-sm font-semibold text-red-600">{error}</div>}
+      <div className="flex items-center gap-2">
+        <Button type="submit" variant="primary" disabled={sending}>{sending ? "Sending…" : "Send"}</Button>
+      </div>
+    </form>
+  );
+}
+
+function Profile({ user, onSaved, setView }) {
+  const [displayName, setDisplayName] = useState(user.displayName || "");
+  const [email, setEmail] = useState(user.email || "");
+  const [bio, setBio] = useState(user.bio || "");
+  const [phone, setPhone] = useState(user.phone || "");
+  const [avatar, setAvatar] = useState(user.avatar || "");
+  const [avatarFile, setAvatarFile] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [passwordLoading, setPasswordLoading] = useState(false);
+  const [message, setMessage] = useState("");
+  const [passwordMessage, setPasswordMessage] = useState("");
+  const [error, setError] = useState("");
+  const [passwordError, setPasswordError] = useState("");
+  const [currentPassword, setCurrentPassword] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+
+  const canChangeName = (() => {
+    if (!user.nameChangedAt) return true;
+    const days = (Date.now() - new Date(user.nameChangedAt).getTime()) / 86400000;
+    return days >= 60;
+  })();
+
+  async function changePassword(e) {
+    e.preventDefault();
+    setPasswordError(""); setPasswordMessage(""); setPasswordLoading(true);
+    const res = await api("/auth/change-password", {
+      method: "POST",
+      body: JSON.stringify({
+        token: user.token,
+        currentPassword,
+        newPassword,
+        confirmPassword
+      })
+    });
+    setPasswordLoading(false);
+    if (res.ok) {
+      setCurrentPassword(""); setNewPassword(""); setConfirmPassword("");
+      setPasswordMessage("Password changed successfully.");
+    } else if (res.error && res.error.includes("session has expired")) {
+      setPasswordError(res.error);
+      setView("auth");
+    } else {
+      setPasswordError(res.error || "Could not change your password.");
+    }
+  }
+
+  async function save(e) {
+    e.preventDefault();
+    setError(""); setMessage(""); setLoading(true);
+    let finalAvatar = avatar;
+    if (avatarFile) {
+      try { finalAvatar = await resizeImageFile(avatarFile, 512, 0.82); }
+      catch (err) { setLoading(false); setError("Could not process that image. Please choose a JPG, PNG, or WebP image."); return; }
+    }
+    const payload = { token: user.token, email, bio, phone, avatar: finalAvatar };
+    if (displayName.trim() !== (user.displayName || "")) payload.displayName = displayName.trim();
+    const res = await api("/auth/profile", { method: "PUT", body: JSON.stringify(payload) });
+    setLoading(false);
+    if (res.ok) {
+      setAvatar(res.user.avatar || "");
+      setAvatarFile(null);
+      onSaved(res.user);
+      setMessage(res.user.emailVerified ? "Profile updated successfully." : "Profile updated. Please verify your new email address.");
+    } else setError(res.error || "Could not update your profile.");
+  }
+
+  return (
+    <div className="max-w-2xl mx-auto px-5 py-12">
+      <div className="mb-7">
+        <h1 className="text-2xl font-extrabold text-slate-900">Your profile</h1>
+        <p className="text-sm text-slate-500 mt-1">Update your personal information and profile details.</p>
+      </div>
+      <form onSubmit={save} className="bg-white rounded-2xl border border-slate-200 p-6 shadow-sm space-y-5">
+        <div className="flex items-center gap-4">
+          {avatar ? <img src={avatar} alt="" className="w-16 h-16 rounded-full object-cover border border-slate-200" /> :
+            <div className="w-16 h-16 rounded-full bg-violet-100 text-violet-700 flex items-center justify-center text-xl font-extrabold">{(displayName || "?")[0].toUpperCase()}</div>}
+          <div>
+            <label className="inline-flex items-center gap-2 rounded-xl border-2 border-violet-200 text-violet-700 px-4 py-2.5 text-sm font-bold cursor-pointer hover:bg-violet-50">
+              <Icon path={ICONS.upload} size={16} /> Upload from computer
+              <input type="file" accept="image/png,image/jpeg,image/webp" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) setAvatarFile(f); }} />
+            </label>
+            <div className="text-xs text-slate-400 mt-2">JPG, PNG, or WebP. The image is resized before upload.</div>
+            {avatarFile && <div className="text-xs font-semibold text-violet-600 mt-1">Selected: {avatarFile.name}</div>}
+          </div>
+        </div>
+        <TextField label="Name" value={displayName} onChange={(e) => setDisplayName(e.target.value)} disabled={!canChangeName}
+          hint={canChangeName ? "You can change your name now. After changing it, the next change is available in 60 days." : "Name changes are locked until 60 days after your last change."} />
+        <TextField label="Email" type="email" required value={email} onChange={(e) => setEmail(e.target.value)} hint={user.emailVerified ? "Verified email address." : "Email verification required."} />
+        <TextField label="Phone" value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="+95 ..." />
+        <TextArea label="Bio" rows={4} value={bio} onChange={(e) => setBio(e.target.value)} placeholder="Tell people a little about yourself." />
+        <TextField label="Profile image URL" value={avatar} onChange={(e) => setAvatar(e.target.value)} placeholder="https://..." />
+        <div className="rounded-xl bg-slate-50 border border-slate-200 p-4 text-sm">
+          <span className="font-bold">Username:</span> {user.username}
+          <span className="text-slate-400 ml-2">(username cannot be changed here)</span>
+        </div>
+        {error && <p className="text-sm text-red-600 font-semibold">{error}</p>}
+        {message && <p className="text-sm text-emerald-600 font-semibold">{message}</p>}
+
+        <div className="border-t border-slate-200 pt-5">
+          <h2 className="font-bold text-slate-900 mb-1">Change password</h2>
+          <p className="text-xs text-slate-500 mb-4">If the creator gave you a temporary password, enter it as your current password and choose your own password.</p>
+          <div className="space-y-4">
+            <TextField label="Current password" type="password" value={currentPassword} onChange={(e) => setCurrentPassword(e.target.value)} autoComplete="current-password" />
+            <TextField label="New password" type="password" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} hint="At least 6 characters" autoComplete="new-password" />
+            <TextField label="Confirm new password" type="password" value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} autoComplete="new-password" />
+            {passwordError && <p className="text-sm text-red-600 font-semibold">{passwordError}</p>}
+            {passwordMessage && <p className="text-sm text-emerald-600 font-semibold">{passwordMessage}</p>}
+            <Button type="button" variant="outline" onClick={changePassword}
+              disabled={passwordLoading || !currentPassword || !newPassword || !confirmPassword}>
+              {passwordLoading ? "Changing…" : "Change password"}
+            </Button>
+          </div>
+        </div>
+
+        <div className="flex gap-3">
+          <Button type="submit" className="flex-1" disabled={loading}>{loading ? "Saving…" : "Save changes"}</Button>
+          <Button type="button" variant="ghost" onClick={() => setView("browse")}>Cancel</Button>
+        </div>
+      </form>
+    </div>
+  );
+}
+
+function AdminLogin({ isAdmin, onLogin, onLogout }) {
+  const [username, setUsername] = useState("");
+  const [password, setPassword] = useState("");
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
+
+  async function submit(e) {
+    e.preventDefault();
+    setError(""); setLoading(true);
+    const res = await api("/auth/admin", { method: "POST", body: JSON.stringify({ username, password }) });
+    setLoading(false);
+    if (res.ok) onLogin({ username: res.username, role: res.role, password, canDelete: res.canDelete, canViewApplications: res.canViewApplications });
+    else setError(res.error || "Incorrect username or password.");
+  }
+
+  if (isAdmin) {
+    return (
+      <div className="max-w-sm mx-auto px-5 py-16 text-center">
+        <TSOMark size={40} />
+        <h2 className="text-xl font-bold mt-4 mb-2">You're signed in as creator</h2>
+        <p className="text-slate-500 text-sm mb-6">{isAdmin && "You can add and edit posts."} {isAdmin && "Only the main creator can delete posts or view job applications."}</p>
+        <Button variant="ghost" onClick={onLogout}>Sign out of creator account</Button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="max-w-sm mx-auto px-5 py-14">
+      <div className="text-center mb-7">
+        <div className="inline-flex"><TSOMark size={40} /></div>
+        <h1 className="text-xl font-extrabold text-slate-900 mt-3">Creator login</h1>
+        <p className="text-slate-500 text-sm mt-1">Sign in to manage job posts on Talentshowoff.</p>
+      </div>
+      <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-sm">
+        <form onSubmit={submit} className="space-y-4">
+          <TextField label="Username" required value={username} onChange={(e) => setUsername(e.target.value)} autoCapitalize="none" autoCorrect="off" />
+          <TextField label="Password" type="password" required value={password} onChange={(e) => setPassword(e.target.value)} />
+          {error && <p className="text-sm text-red-600 font-semibold">{error}</p>}
+          <Button type="submit" className="w-full" disabled={loading}>{loading ? "Checking…" : "Sign in"}</Button>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+
+
+function JobModeration({ adminUsername, adminPassword, onNotify, onJobsChanged }) {
+  const [items, setItems] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState("");
+  const auth = () => ({ adminUsername, adminPassword });
+
+  async function load() {
+    setLoading(true);
+    const res = await api("/admin/job-submissions?" + new URLSearchParams(auth()).toString());
+    setLoading(false);
+    if (res.ok) setItems(res.jobs || []);
+    else onNotify(res.error || "Could not load moderation queue.");
+  }
+  useEffect(() => { load(); }, []);
+
+  async function moderate(job, action) {
+    setBusy(job.id + action);
+    const reason = action === "reject" ? (window.prompt("Reason for rejection (optional):", "Potential scam, misleading or unsafe job post.") || "Rejected during scam/safety review.") : "";
+    if (action === "reject" && reason === null) { setBusy(""); return; }
+    const res = await api(`/admin/job-submissions/${encodeURIComponent(job.id)}/${action}`, {
+      method: "POST", body: JSON.stringify({ ...auth(), reason })
+    });
+    setBusy("");
+    if (!res.ok) return onNotify(res.error || "Moderation action failed.");
+    setItems(prev => prev.filter(x => x.id !== job.id));
+    onNotify(res.message || (action === "approve" ? "Post approved." : "Post rejected."));
+    await onJobsChanged();
+  }
+
+  return (
+    <div className="max-w-6xl mx-auto px-5 py-10">
+      <div className="mb-7">
+        <div className="flex items-center gap-2 text-violet-600 text-xs font-bold uppercase tracking-widest mb-2"><Icon path="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" size={14}/> Trust & Safety</div>
+        <div className="flex flex-wrap items-end justify-between gap-3">
+          <div><h1 className="text-2xl sm:text-3xl font-extrabold text-slate-900 tracking-tight">Post moderation</h1><p className="text-slate-500 text-sm mt-1">Review registered-user job posts before they become public. Reject scam, misleading, suspicious, or unsafe listings.</p></div>
+          <Button variant="ghost" onClick={load}>↻ Refresh</Button>
+        </div>
+      </div>
+      <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 mb-5 text-sm text-amber-900"><strong>Safety workflow:</strong> user post → pending review → approved and published OR rejected and hidden. A rejected user submission automatically refunds the 2 TSO coin fee once.</div>
+      {loading ? <div className="bg-white rounded-2xl border p-8 text-center text-slate-400">Loading moderation queue…</div> :
+       items.length === 0 ? <div className="bg-white rounded-2xl border border-dashed p-12 text-center"><div className="text-4xl mb-3">🛡️</div><p className="font-extrabold text-slate-800">Queue clear</p><p className="text-sm text-slate-500 mt-1">No pending or rejected submissions need attention.</p></div> :
+       <div className="space-y-4">{items.map(job => (
+         <article key={job.id} className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+           <div className="p-5 sm:p-6">
+             <div className="flex flex-wrap items-start justify-between gap-3">
+               <div><div className="flex items-center gap-2 mb-2"><Badge tone={job.approvalStatus === "pending" ? "amber" : "slate"}>{job.approvalStatus}</Badge><span className="text-xs text-slate-400">Submitted {job.submittedAt ? new Date(job.submittedAt).toLocaleString() : new Date(job.postedAt).toLocaleString()}</span></div>
+                 <h2 className="text-lg font-extrabold text-slate-900">{job.title || "Image job announcement"}</h2>
+                 <p className="text-sm text-slate-500 mt-1">{job.company || "—"} · {job.location || "—"} · {job.type || "—"}</p>
+                 <p className="text-xs text-slate-400 mt-1">Submitted by @{job.employerUsername || "unknown"}</p>
+               </div>
+               <div className="flex gap-2"><Button onClick={() => moderate(job, "approve")} disabled={busy}>{busy === job.id+"approve" ? "Approving…" : "✓ Approve & publish"}</Button><Button variant="danger" onClick={() => moderate(job, "reject")} disabled={busy}>{busy === job.id+"reject" ? "Rejecting…" : "✕ Reject"}</Button></div>
+             </div>
+             {job.imageData ? <img src={job.imageData} alt="Submitted job flyer" className="mt-5 max-h-[420px] w-full object-contain rounded-xl border border-slate-200 bg-slate-50"/> :
+               <div className="mt-5 rounded-xl bg-slate-50 border border-slate-200 p-4 space-y-2 text-sm"><p><strong>Category:</strong> {job.category || "—"}</p><p><strong>Pay:</strong> {job.pay || "Not stated"}</p><p className="whitespace-pre-line"><strong>Description:</strong>{"\n"}{job.description || "—"}</p></div>}
+             {job.rejectionReason && <div className="mt-4 rounded-xl bg-red-50 border border-red-100 p-3 text-sm text-red-700"><strong>Previous rejection:</strong> {job.rejectionReason}</div>}
+           </div>
+         </article>
+       ))}</div>}
+    </div>
+  );
+}
+
+function CreatorCoinManagement({ adminUsername, adminPassword }) {
+  const [users, setUsers] = useState([]);
+  const [selectedUsername, setSelectedUsername] = useState("");
+  const [amount, setAmount] = useState("10");
+  const [reason, setReason] = useState("Creator coin reward");
+  const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState("");
+  const auth = () => ({ adminUsername, adminPassword });
+
+  async function load() {
+    setLoading(true);
+    const res = await api("/creator/users/coins?" + new URLSearchParams(auth()).toString());
+    setLoading(false);
+    if (res.ok) {
+      setUsers(res.users || []);
+      if (!selectedUsername && res.users?.length) setSelectedUsername(res.users[0].username);
+      setMessage("");
+    } else setMessage(res.error || "Could not load users.");
+  }
+  useEffect(() => { load(); }, []);
+
+  async function addCoins(e) {
+    e.preventDefault();
+    setBusy(true); setMessage("");
+    const res = await api("/creator/users/add-coins", {
+      method: "POST",
+      body: JSON.stringify({ ...auth(), username: selectedUsername, amount: Number(amount), reason })
+    });
+    setBusy(false);
+    if (!res.ok) return setMessage(res.error || "Could not add TSO coins.");
+    setMessage(`${res.displayName || res.username} received +${res.addedCoins} TSO coins. New balance: ${res.tsoCoins} TSO coins.`);
+    setUsers(prev => prev.map(u => u.username.toLowerCase() === res.username.toLowerCase() ? { ...u, tsoCoins: res.tsoCoins } : u));
+  }
+
+  return (
+    <div className="max-w-5xl mx-auto px-5 py-10 space-y-6">
+      <div>
+        <h1 className="text-2xl sm:text-3xl font-extrabold text-slate-900">Give TSO Coins</h1>
+        <p className="text-sm text-slate-500 mt-1">Creators can reward users with additional TSO coins. Every grant is recorded in the user's coin history.</p>
+      </div>
+
+      <div className="bg-white rounded-2xl border border-violet-200 p-6 shadow-sm">
+        <form onSubmit={addCoins} className="grid md:grid-cols-[1fr_160px_1fr_auto] gap-4 items-end">
+          <div>
+            <label className="block text-sm font-bold text-slate-700 mb-1.5">User</label>
+            <select value={selectedUsername} onChange={e=>setSelectedUsername(e.target.value)} disabled={loading || !users.length} className="w-full rounded-xl border border-slate-200 px-3 py-3 text-sm font-semibold outline-none focus:border-violet-400 bg-white">
+              {users.length === 0 ? <option value="">No users found</option> : users.map(u => <option key={u.username} value={u.username}>{u.displayName || u.username} — {u.tsoCoins ?? 0} TSO</option>)}
+            </select>
+          </div>
+          <TextField label="Coins to add" type="number" min="1" max="100000" value={amount} onChange={e=>setAmount(e.target.value)} required />
+          <TextField label="Reason (optional)" value={reason} onChange={e=>setReason(e.target.value)} />
+          <Button type="submit" disabled={busy || loading || !selectedUsername}>{busy ? "Adding…" : "+ Add coins"}</Button>
+        </form>
+        {message && <p className="mt-4 text-sm font-semibold text-violet-700 bg-violet-50 rounded-xl p-3">{message}</p>}
+      </div>
+
+      <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+        <div className="px-5 py-4 border-b border-slate-200 flex items-center justify-between">
+          <div><h2 className="font-bold text-slate-900">User TSO balances</h2><p className="text-xs text-slate-500 mt-1">Select a user above to reward them.</p></div>
+          <button onClick={load} className="text-sm font-bold text-violet-600">Refresh</button>
+        </div>
+        {loading ? <p className="p-5 text-sm text-slate-400">Loading users…</p> : users.length === 0 ? <p className="p-5 text-sm text-slate-500">No registered users yet.</p> : (
+          <div className="divide-y divide-slate-100 max-h-[520px] overflow-y-auto">
+            {users.map(u => <button type="button" key={u.username} onClick={()=>setSelectedUsername(u.username)} className={`w-full px-5 py-4 flex items-center justify-between text-left hover:bg-violet-50 ${selectedUsername === u.username ? "bg-violet-50" : ""}`}><div><div className="font-bold text-slate-900">{u.displayName || u.username}</div><div className="text-xs text-slate-500">@{u.username}</div></div><span className="font-extrabold text-violet-700">{u.tsoCoins ?? 0} TSO</span></button>)}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function CreatorUserManagement({ adminUsername, adminPassword, onPasswordNotice }) {
+  const [users, setUsers] = useState([]);
+  const [creators, setCreators] = useState([]);
+  const [displayName, setDisplayName] = useState("");
+  const [username, setUsername] = useState("");
+  const [email, setEmail] = useState("");
+  const [creatorName, setCreatorName] = useState("");
+  const [creatorUsername, setCreatorUsername] = useState("");
+  const [creatorEmail, setCreatorEmail] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [creatorBusy, setCreatorBusy] = useState(false);
+  const [message, setMessage] = useState("");
+  const [mailboxes, setMailboxes] = useState([]);
+  const [mailboxDomain, setMailboxDomain] = useState("talentshowoff.com");
+  const [mailboxConfigured, setMailboxConfigured] = useState(true);
+
+  const auth = () => ({ adminUsername, adminPassword });
+
+  async function load() {
+    const q = new URLSearchParams(auth()).toString();
+    const [userRes, creatorRes, mailboxRes] = await Promise.all([
+      api("/admin/users?" + q),
+      api("/admin/creators?" + q),
+      api("/admin/mailboxes?" + q)
+    ]);
+    if (userRes.ok) setUsers(userRes.users);
+    else setMessage(userRes.error || "Could not load users.");
+    if (creatorRes.ok) setCreators(creatorRes.creators);
+    else setMessage(creatorRes.error || "Could not load creator accounts.");
+    if (mailboxRes.ok) {
+      setMailboxes(mailboxRes.mailboxes || []);
+      setMailboxDomain(mailboxRes.domain || "talentshowoff.com");
+      setMailboxConfigured(true);
+    } else {
+      setMailboxes([]);
+      setMailboxConfigured(mailboxRes.configured !== false);
+    }
+  }
+  useEffect(() => { load(); }, []);
+
+  async function create(e) {
+    e.preventDefault(); setBusy(true); setMessage("");
+    const res = await api("/admin/users", { method:"POST", body:JSON.stringify({...auth(), username, displayName, email}) });
+    setBusy(false);
+    if (!res.ok) return setMessage(res.error || "Could not create user.");
+    setMessage(`User account created. Generated password: ${res.generatedPassword}${res.emailed ? " — emailed to the user." : " — Resend email was not sent."}`);
+    setUsername(""); setDisplayName(""); setEmail(""); load();
+  }
+
+  async function resetUser(user) {
+    if (!window.confirm(`Reset the password for ${user.username}?`)) return;
+    const res = await api("/admin/users/reset-password", { method:"POST", body:JSON.stringify({...auth(), username:user.username}) });
+    if (res.ok) {
+      setMessage(`New password for ${user.username}: ${res.generatedPassword}${res.emailed ? " — emailed to the user." : ""}`);
+      onPasswordNotice(res.generatedPassword);
+    } else setMessage(res.error || "Could not reset password.");
+  }
+
+  async function removeUser(user) {
+    if (!window.confirm(`Remove registered account "${user.username}"? This permanently removes the account and its TSO coin history.`)) return;
+    const res = await api("/admin/users", { method:"DELETE", body:JSON.stringify({...auth(), username:user.username}) });
+    if (res.ok) { setMessage(`Registered account ${user.username} was removed.`); load(); }
+    else setMessage(res.error || "Could not remove user account.");
+  }
+
+  async function createCreator(e) {
+    e.preventDefault(); setCreatorBusy(true); setMessage("");
+    const res = await api("/admin/creators", {
+      method:"POST",
+      body:JSON.stringify({...auth(), username:creatorUsername, displayName:creatorName, email:creatorEmail})
+    });
+    setCreatorBusy(false);
+    if (!res.ok) return setMessage(res.error || "Could not create creator account.");
+    setMessage(`Second creator account created. Temporary password: ${res.generatedPassword}${res.emailed ? " — emailed with Resend." : " — Resend email was not sent."}`);
+    setCreatorUsername(""); setCreatorName(""); setCreatorEmail("");
+    load();
+  }
+
+  async function resetCreator(creator) {
+    if (!window.confirm(`Change the password for creator ${creator.username}?`)) return;
+    const res = await api("/admin/creators/reset-password", {
+      method:"POST", body:JSON.stringify({...auth(), username:creator.username})
+    });
+    if (res.ok) {
+      setMessage(`New password for creator ${creator.username}: ${res.generatedPassword}${res.emailed ? " — emailed with Resend." : ""}`);
+      onPasswordNotice(res.generatedPassword);
+    } else setMessage(res.error || "Could not change creator password.");
+  }
+
+  async function removeCreator(creator) {
+    if (!window.confirm(`Remove the second creator account "${creator.username}"? They will no longer be able to sign in.`)) return;
+    const res = await api("/admin/creators", {
+      method:"DELETE", body:JSON.stringify({...auth(), username:creator.username})
+    });
+    if (res.ok) {
+      setMessage(`Creator account ${creator.username} was removed.`);
+      load();
+    } else setMessage(res.error || "Could not remove creator account.");
+  }
+
+  return (
+    <div className="max-w-5xl mx-auto px-5 py-10 space-y-8">
+      <div>
+        <h1 className="text-2xl font-extrabold text-slate-900">Creator management</h1>
+        <p className="text-sm text-slate-500 mt-1">Only the main creator can add, remove, or change the password of a second creator account.</p>
+      </div>
+
+      <div className="bg-white rounded-2xl border border-emerald-200 p-6 shadow-sm">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-5">
+          <div>
+            <h2 className="font-bold text-slate-900 mb-1">Talentshowoff mail names</h2>
+            <p className="text-xs text-slate-500">See how many mailbox names have been created and which <b>@{mailboxDomain}</b> addresses are in use.</p>
+          </div>
+          <div className="rounded-2xl bg-emerald-50 px-5 py-3 text-center min-w-[110px]">
+            <div className="text-3xl font-extrabold text-emerald-700">{mailboxes.length}</div>
+            <div className="text-[11px] font-bold uppercase tracking-wide text-emerald-600">Mailboxes</div>
+          </div>
+        </div>
+        {!mailboxConfigured ? (
+          <p className="text-sm text-slate-500">Mail service is not configured on this deployment.</p>
+        ) : mailboxes.length === 0 ? (
+          <p className="text-sm text-slate-500">No Talentshowoff mailboxes have been created yet.</p>
+        ) : (
+          <div className="border border-slate-200 rounded-xl overflow-hidden">
+            <div className="px-4 py-3 bg-slate-50 font-bold text-slate-900">Created mail names ({mailboxes.length})</div>
+            <div className="divide-y divide-slate-100 max-h-80 overflow-y-auto">
+              {mailboxes.map(m => (
+                <div key={m.address || m.local_part} className="px-4 py-3 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                  <div>
+                    <div className="font-bold text-slate-900">{m.address || `${m.local_part}@${mailboxDomain}`}</div>
+                    <div className="text-xs text-slate-500">User: {m.owner_username || "—"}{m.display_name ? ` · ${m.display_name}` : ""}</div>
+                  </div>
+                  <div className="text-xs text-slate-400">{m.created_at ? fmtDate(m.created_at) : ""}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+
+      <div className="bg-white rounded-2xl border border-violet-200 p-6 shadow-sm">
+        <h2 className="font-bold text-slate-900 mb-1">Second creator accounts</h2>
+        <p className="text-xs text-slate-500 mb-5">These accounts can manage creator features such as job posts. They cannot remove the main creator or view/reply to job applications.</p>
+        <div className="grid lg:grid-cols-[360px,1fr] gap-6">
+          <form onSubmit={createCreator} className="space-y-4">
+            <TextField label="Display name" required value={creatorName} onChange={e=>setCreatorName(e.target.value)} />
+            <TextField label="Username" required value={creatorUsername} onChange={e=>setCreatorUsername(e.target.value)} autoCapitalize="none" />
+            <TextField label="Email (optional)" type="email" value={creatorEmail} onChange={e=>setCreatorEmail(e.target.value)} />
+            <Button className="w-full" disabled={creatorBusy}>{creatorBusy ? "Creating…" : "Add second creator"}</Button>
+          </form>
+
+          <div className="border border-slate-200 rounded-xl overflow-hidden">
+            <div className="px-4 py-3 bg-slate-50 font-bold text-slate-900">Current second creators ({creators.length})</div>
+            {creators.length === 0 ? (
+              <p className="p-5 text-sm text-slate-500">No second creator accounts yet.</p>
+            ) : (
+              <div className="divide-y divide-slate-100">
+                {creators.map(c => (
+                  <div key={c.username} className="p-4 flex flex-col sm:flex-row sm:items-center gap-3 justify-between">
+                    <div>
+                      <div className="font-bold text-slate-900">{c.displayName} <span className="text-slate-400 font-normal">@{c.username}</span></div>
+                      <div className="text-xs text-slate-500">{c.email || "No email"} · {c.role}</div>
+                    </div>
+                    <div className="flex gap-3 text-sm font-bold">
+                      <button onClick={()=>resetCreator(c)} className="text-violet-600">Change password</button>
+                      <button onClick={()=>removeCreator(c)} className="text-red-600">Remove</button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+
+      <div className="grid lg:grid-cols-[360px,1fr] gap-6">
+        <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-sm">
+          <h2 className="font-bold text-slate-900 mb-4">Create user account</h2>
+          <form onSubmit={create} className="space-y-4">
+            <TextField label="Display name" required value={displayName} onChange={e=>setDisplayName(e.target.value)} />
+            <TextField label="Username" required value={username} onChange={e=>setUsername(e.target.value)} />
+            <TextField label="Email" type="email" required value={email} onChange={e=>setEmail(e.target.value)} />
+            <Button className="w-full" disabled={busy}>{busy ? "Creating…" : "Create & generate password"}</Button>
+          </form>
+          {message && <p className="mt-4 text-sm font-semibold text-violet-700 bg-violet-50 rounded-xl p-3 break-words">{message}</p>}
+        </div>
+        <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+          <div className="px-5 py-4 border-b border-slate-200 flex items-center justify-between"><h2 className="font-bold text-slate-900">Registered users ({users.length})</h2><button onClick={load} className="text-sm font-bold text-violet-600">Refresh</button></div>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm"><thead className="bg-slate-50 text-slate-500"><tr><th className="text-left px-5 py-3">Username</th><th className="text-left px-5 py-3">Display name</th><th className="text-left px-5 py-3">Join date</th><th className="text-right px-5 py-3">Action</th></tr></thead>
+            <tbody>{users.map(u=><tr key={u.username} className="border-t border-slate-100"><td className="px-5 py-3 font-semibold">{u.username}</td><td className="px-5 py-3">{u.displayName}</td><td className="px-5 py-3 text-slate-500">{u.createdAt ? new Date(u.createdAt).toLocaleString() : "—"}</td><td className="px-5 py-3 text-right"><button onClick={()=>resetUser(u)} className="text-violet-600 font-bold">Reset password</button></td></tr>)}</tbody></table>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function LegalPage({ type, onBack }) {
+  const isTerms = type === "terms";
+  return (
+    <div className="max-w-4xl mx-auto px-5 py-10">
+      <button onClick={onBack} className="text-sm font-bold text-violet-600 hover:text-violet-800 mb-5">← Back to account creation</button>
+      <article className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6 sm:p-10 prose prose-slate max-w-none">
+        <h1 className="text-3xl font-extrabold text-slate-900">{isTerms ? "Terms of Service" : "Privacy Policy"}</h1>
+        <p className="text-sm text-slate-400">Effective date: August 13, 2026 · Version {isTerms ? TERMS_VERSION : PRIVACY_VERSION}</p>
+        {isTerms ? <TermsContent /> : <PrivacyContent />}
+        <div className="mt-10 pt-6 border-t border-slate-200">
+          <Button type="button" onClick={onBack}>Return to account creation</Button>
+        </div>
+      </article>
+    </div>
+  );
+}
+
+function TermsContent() {
+  return <div className="space-y-6 text-sm leading-7 text-slate-600">
+    <section><h2>1. About Talentshowoff</h2><p>Talentshowoff is a job and opportunity website that helps visitors discover vacancies, career opportunities, and related posts. By creating an account or using the service, you agree to these Terms.</p></section>
+    <section><h2>2. Accounts</h2><p>You must provide accurate information and keep your login credentials secure. You are responsible for activity under your account. Do not impersonate another person, create misleading accounts, or use a username reserved for a Talentshowoff creator account.</p></section>
+    <section><h2>3. Job posts and applications</h2><p>Job information is supplied by the account or creator publishing the post. Talentshowoff does not guarantee employment, salary, interview selection, employer identity, or the accuracy or availability of every vacancy. Users should independently verify important employment details before sharing sensitive information or accepting an offer.</p></section>
+    <section><h2>4. Acceptable use</h2><p>You must not post or submit unlawful, fraudulent, abusive, discriminatory, defamatory, sexually explicit, malicious, or misleading material; scrape or attack the service; attempt unauthorized access; distribute malware; or use the platform to collect personal information for harmful purposes.</p></section>
+    <section><h2>5. User content</h2><p>You keep ownership of content you submit, but you give Talentshowoff permission to store, display, and process that content as necessary to operate the service. Do not upload content you do not have permission to use.</p></section>
+    <section><h2>6. Moderation and removal</h2><p>Talentshowoff may review, restrict, edit, or remove content or accounts when reasonably necessary to protect users, maintain the service, comply with law, or enforce these Terms.</p></section>
+    <section><h2>7. Third-party services</h2><p>The website may use third-party services such as email delivery providers. Their services may have separate terms and privacy practices.</p></section>
+    <section><h2>8. No guarantee</h2><p>The service is provided on an “as available” basis. To the extent permitted by applicable law, Talentshowoff is not responsible for losses arising from inaccurate job posts, hiring decisions, user content, third-party conduct, or interruptions outside reasonable control.</p></section>
+    <section><h2>9. Changes</h2><p>These Terms may be updated as the service changes. Continued use after an updated effective date may constitute acceptance where permitted by law.</p></section>
+    <section><h2>10. Contact</h2><p>For questions about these Terms, contact the Talentshowoff administrator through the official contact channel published on the website.</p></section>
+    <p className="text-xs text-slate-400">This document is general website terms, not legal advice. A qualified lawyer should review it for the laws and jurisdiction where Talentshowoff operates.</p>
+  </div>;
+}
+
+function PrivacyContent() {
+  return <div className="space-y-6 text-sm leading-7 text-slate-600">
+    <section><h2>1. Information we collect</h2><p>Depending on how you use Talentshowoff, we may collect account information such as your name, username, email address, phone number, profile information, profile image, security-question data, and information you provide when applying for a job.</p></section>
+    <section><h2>2. How we use information</h2><p>We use information to create and secure accounts, verify email addresses, provide profiles and applications, operate and improve the job board, communicate important account messages, prevent abuse, and comply with legal obligations.</p></section>
+    <section><h2>3. Passwords and security answers</h2><p>Passwords and security answers should be stored using secure one-way credential hashing. Do not reuse sensitive passwords or provide an answer that is easy for other people to guess.</p></section>
+    <section><h2>4. Email verification</h2><p>When account verification is required, Talentshowoff may send a one-time verification link through an email delivery provider. Verification tokens should expire and are intended only for the account holder.</p></section>
+    <section><h2>5. Job applications</h2><p>Application information may be shared with the creator or authorized party responsible for the relevant job post. Only provide information you are comfortable sharing for a job application and avoid submitting unnecessary sensitive personal information.</p></section>
+    <section><h2>6. Cookies and local storage</h2><p>The website may use browser storage to maintain your signed-in session and basic preferences. Clearing browser storage can sign you out of the site.</p></section>
+    <section><h2>7. Third-party services</h2><p>Talentshowoff may rely on third-party infrastructure and services, including email delivery providers. Those providers may process limited information according to their own policies and contracts.</p></section>
+    <section><h2>8. Retention and deletion</h2><p>Information may be retained for as long as needed to operate accounts, process applications, maintain security records, resolve disputes, or satisfy legal requirements. Requests for account or data deletion can be made through the official contact channel, subject to legitimate retention requirements.</p></section>
+    <section><h2>9. Your choices</h2><p>You can update permitted profile information from your profile page. Name changes are limited to once every 60 days. Changing an email address requires verification before the account can be used again.</p></section>
+    <section><h2>10. Children</h2><p>The service is intended for people who can legally use online employment or career services in their jurisdiction. Do not create an account if you are not permitted to do so under applicable law.</p></section>
+    <section><h2>11. Changes to this policy</h2><p>This Privacy Policy may be updated when the service or legal requirements change. The effective date and version will be shown at the top of the policy.</p></section>
+    <p className="text-xs text-slate-400">This document is a general privacy notice, not legal advice. It should be reviewed and adapted by a qualified privacy/legal professional for the applicable jurisdiction and actual data practices.</p>
+  </div>;
+}
+
+/* ---------- TSO — floating chat assistant, available site-wide ---------- */
+function TSOChat({ isAdmin, adminUsername, adminPassword, openSignal }) {
+  const [open, setOpen] = useState(false);
+  const [messages, setMessages] = useState(() => [
+    { role: "tso", text: "Hi, I'm TSO! Ask me about job listings, how to apply, or how to sign up." }
+  ]);
+  const [input, setInput] = useState("");
+  const [sending, setSending] = useState(false);
+  const [error, setError] = useState("");
+  const scrollRef = useRef(null);
+
+  useEffect(() => {
+    if (openSignal) setOpen(true);
+  }, [openSignal]);
+
+  useEffect(() => {
+    if (open && scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+  }, [messages, open, sending]);
+
+  useEffect(() => {
+    setMessages((prev) => {
+      if (prev.length > 1) return prev; // don't reset an in-progress conversation
+      return [{
+        role: "tso",
+        text: isAdmin
+          ? "Hi, I'm TSO! I can help draft a post, give you a read on an applicant, or answer questions about your recent activity."
+          : "Hi, I'm TSO! Ask me about job listings, how to apply, or how to sign up.",
+      }];
+    });
+  }, [isAdmin]);
+
+  async function send() {
+    const text = input.trim();
+    if (!text || sending) return;
+    const history = messages.slice(-8).map((m) => ({ role: m.role, text: m.text }));
+    setMessages((prev) => [...prev, { role: "user", text }]);
+    setInput(""); setSending(true); setError("");
+    const res = await api("/ai/chat", {
+      method: "POST",
+      body: JSON.stringify({ message: text, history, adminUsername: isAdmin ? adminUsername : undefined, adminPassword: isAdmin ? adminPassword : undefined }),
+    });
+    setSending(false);
+    if (res.ok) setMessages((prev) => [...prev, { role: "tso", text: res.reply }]);
+    else setError(res.error || "TSO couldn't respond just now.");
+  }
+
+  function handleKeyDown(e) {
+    if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); }
+  }
+
+  return (
+    <React.Fragment>
+      <button onClick={() => setOpen((o) => !o)}
+        className="fixed bottom-5 right-5 z-40 rounded-full shadow-xl text-white flex items-center gap-2 px-4 py-3 font-bold text-sm"
+        style={{ background: "linear-gradient(135deg, #1e1b6e 0%, #7c3aed 100%)" }}>
+        <Sparkles size={18} />{open ? "Close" : "Chat with TSO"}
+      </button>
+      {open && (
+        <div className="fixed bottom-20 right-5 z-40 w-[92vw] max-w-sm h-[70vh] max-h-[560px] bg-white rounded-2xl border border-slate-200 shadow-2xl flex flex-col overflow-hidden">
+          <div className="px-4 py-3 text-white flex items-center gap-2" style={{ background: "linear-gradient(135deg, #1e1b6e 0%, #7c3aed 100%)" }}>
+            <Sparkles size={16} />
+            <div>
+              <p className="font-extrabold text-sm leading-tight">TSO</p>
+              <p className="text-xs text-white/80 leading-tight">{isAdmin ? "Creator assistant" : "Talentshowoff assistant"}</p>
+            </div>
+          </div>
+          <div ref={scrollRef} className="flex-1 overflow-y-auto px-4 py-3 space-y-3">
+            {messages.map((m, i) => (
+              <div key={i} className={`flex ${m.role === "user" ? "justify-end" : "justify-start"}`}>
+                <div className={`rounded-2xl px-3 py-2 text-sm max-w-[85%] whitespace-pre-line ${m.role === "user" ? "text-white" : "bg-slate-100 text-slate-700"}`}
+                  style={m.role === "user" ? { background: "linear-gradient(135deg, #1e1b6e 0%, #7c3aed 100%)" } : {}}>
+                  {m.text}
+                </div>
+              </div>
+            ))}
+            {sending && <div className="flex justify-start"><div className="rounded-2xl px-3 py-2 text-sm bg-slate-100 text-slate-400">TSO is typing…</div></div>}
+            {error && <p className="text-xs text-red-600 font-semibold">{error}</p>}
+          </div>
+          <div className="border-t border-slate-100 p-3 flex items-end gap-2">
+            <textarea value={input} onChange={(e) => setInput(e.target.value)} onKeyDown={handleKeyDown} rows={1}
+              placeholder="Message TSO…" className="flex-1 resize-none rounded-xl border border-slate-200 px-3 py-2 text-sm outline-none focus:border-violet-400 max-h-24" />
+            <Button type="button" onClick={send} disabled={sending || !input.trim()}>Send</Button>
+          </div>
+        </div>
+      )}
+    </React.Fragment>
+  );
+}
+
+function Footer() {
+  return (
+    <footer className="border-t border-slate-200 mt-8">
+      <div className="max-w-6xl mx-auto px-5 py-8 flex flex-col sm:flex-row items-center justify-between gap-3">
+        <div className="flex items-center gap-2"><TSOMark size={22} /><span className="text-sm font-bold text-slate-700">Talentshowoff</span></div>
+        <div className="flex items-center gap-4 text-xs font-semibold">
+          <button onClick={() => window.dispatchEvent(new CustomEvent("tso:navigate", { detail: "terms" }))} className="text-slate-500 hover:text-violet-700">Terms of Service</button>
+          <button onClick={() => window.dispatchEvent(new CustomEvent("tso:navigate", { detail: "privacy" }))} className="text-slate-500 hover:text-violet-700">Privacy Policy</button>
+        </div>
+      </div>
+      <div className="text-center text-xs text-slate-400 pb-6">© 2026 Talentshowoff. All rights reserved.</div>
+    </footer>
+  );
+}
+
+const root = ReactDOM.createRoot(document.getElementById("root"));
+root.render(<App />);
+</script>
+</body>
+</html>
